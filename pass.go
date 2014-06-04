@@ -4,7 +4,7 @@ import (
   "bytes"
   "compress/gzip"
   "compress/flate"
-  "io"
+  "io/ioutil"
   // "crypto/aes"
   "crypto/rand"
   "encoding/json"
@@ -36,15 +36,15 @@ func unmarshal(data []byte) map[string]interface{} {
 // gzip some data
 func compress(data []byte) []byte {
   var result bytes.Buffer
-  w, err := gzip.NewWriterLevel(&result, flate.BestCompression)
+  writer, err := gzip.NewWriterLevel(&result, flate.BestCompression)
 
   if err != nil {
     panic(fmt.Sprintf("Failed to compress data: %v", err))
   }
 
   // compress our data
-  w.Write(data)
-  w.Close()
+  writer.Write(data)
+  writer.Close()
 
   return result.Bytes()
 }
@@ -52,18 +52,18 @@ func compress(data []byte) []byte {
 // gunzip some data
 func decompress(data []byte) []byte {
   b := bytes.NewBuffer(data)
-  r, err := gzip.NewReader(b)
+  reader, err := gzip.NewReader(b)
 
   if err != nil {
     panic(fmt.Sprintf("Failed to decompress data: %v", err))
   }
 
   // compress our data
-  var result []byte
-  _, err = io.ReadFull(r, result)
+  result, err := ioutil.ReadAll(reader)
+  reader.Close()
 
   if err != nil {
-    panic(fmt.Sprintf("Failed to copy decompressed data: %v", err))
+    panic(fmt.Sprintf("Failed to read decompressed data: %v", err))
   }
 
   return result
