@@ -12,7 +12,7 @@ import (
   "code.google.com/p/go.crypto/scrypt"
 )
 
-func marshal(data *map[string]interface{}) []byte {
+func dumpJSON(data *map[string]interface{}) []byte {
   result, err := json.Marshal(data)
 
   if err != nil {
@@ -22,7 +22,7 @@ func marshal(data *map[string]interface{}) []byte {
   return result
 }
 
-func unmarshal(data []byte) map[string]interface{} {
+func loadJSON(data []byte) map[string]interface{} {
   result := make(map[string]interface{})
   err := json.Unmarshal(data, &result)
 
@@ -105,9 +105,9 @@ func main() {
     "bad": nil,
   }
 
-  fmt.Printf("original: %#v\n\n", data)
+  fmt.Printf("json: %#v\n\n", data)
 
-  encryptedData := encrypt(marshal(&data), "password")
+  encryptedData := encrypt(dumpJSON(&data), "password")
 
   fmt.Printf("encrypted: %#v\n\n", encryptedData)
 
@@ -115,9 +115,9 @@ func main() {
 
   fmt.Printf("decrypted: %#v\n\n", decryptedData)
 
-  decryptedJSON := unmarshal(decryptedData)
+  decryptedJSON := loadJSON(decryptedData)
 
-  fmt.Printf("new: %#v\n\n", decryptedJSON)
+  fmt.Printf("read json: %#v\n\n", decryptedJSON)
 
   fmt.Printf("hashedPassword: %#v\n\n", hashPassword("password"))
 }
