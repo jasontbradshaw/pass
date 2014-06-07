@@ -96,52 +96,6 @@ func decompress(data []byte) ([]byte, error) {
   return result, nil
 }
 
-// given some data, pad it to the given block size. if the data is already a
-// multiple of the given blocksize, adds another block of padding. the padding
-// is added to the end of the original data. the padding consists of bytes that
-// are given a value equal to the number of bytes added as padding.
-func pad(data []byte, blockSize int) ([]byte, error) {
-  // make sure we get a block size that fits into a single byte
-  if blockSize <= 0 || blockSize > 255 {
-    err := fmt.Errorf(
-        "Block size must fit into a single byte (0 to 255); got: %d", blockSize)
-    return nil, err
-  }
-
-  // calculate the number of bytes that need to be added to bring the length
-  // to an integer multiple of the block size. see:
-  // http://tools.ietf.org/html/rfc5652#section-6.3
-  padLength := blockSize - (len(data) % blockSize)
-
-  // fill the first part of the padded data with the original data
-  paddedData := make([]byte, len(data) + padLength)
-  copy(paddedData, data)
-
-  // fill the padding with bytes of value equal to the amount of padding added
-  for i := len(data); i < len(paddedData); i++ {
-    paddedData[i] = byte(padLength)
-  }
-
-  return paddedData, nil
-}
-
-// given some padded data, return the data sans the included padding
-func unpad(data []byte) ([]byte, error) {
-  // if we got no data, return what we got
-  if len(data) == 0 { return data, nil }
-
-  // get the number of padding bytes (always stored in the final byte)
-  padLength := data[len(data) - 1]
-
-  // erro if we got a zero padding length
-  if padLength == 0 {
-    return nil, fmt.Errorf("Invalid padding amount: %d" + string(padLength))
-  }
-
-  // return the data without the included padding
-  return data[:len(data) - int(padLength)], nil
-}
-
 // get the signature of the given data as a byte array
 func getSignature(data []byte) []byte {
   // hash the data
@@ -213,23 +167,22 @@ func hashPassword(password string, salt []byte, iterations int) []byte {
 
 // encrypt some data using the given password and return the result
 func encrypt(plaintext []byte, password string) ([]byte, error) {
-  // pad the plaintext to a multiple of the AES block size (see:
-  // http://security.stackexchange.com/a/31657,
-  // http://tools.ietf.org/html/rfc5652#section-6.3).
-  paddedPlaintext, err := pad(plaintext, aes.BlockSize)
-  if err != nil { return nil, err }
+  // NOTE: no plaintext padding is needed since we're using CFB mode (see:
+  // http://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Padding).
 
   // create the parts of the result byte array we need. overall output is the
   // salt, followed by the IV, followed by the ciphertext, followed by the
   // signature of the ciphertext.
   output := make([]byte,
-      SaltSize + aes.BlockSize + len(paddedPlaintext) + SignatureSize)
+      SaltSize + aes.BlockSize + len(plaintext) + SignatureSize)
 
   // slice out the pieces we'll be working with
   salt := output[:SaltSize]
   iv := output[SaltSize:SaltSize + aes.BlockSize]
+
+  // same size as the plaintext, a nice property of CFB mode
   ciphertext := output[SaltSize + aes.BlockSize:
-      SaltSize + aes.BlockSize + len(paddedPlaintext)]
+      SaltSize + aes.BlockSize + len(plaintext)]
 
   // randomize the salt and the IV
   if _, err := rand.Read(salt); err != nil { return nil, err }
@@ -243,10 +196,10 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   if err != nil { return nil, err }
 
   stream := cipher.NewCFBEncrypter(block, iv)
-  stream.XORKeyStream(ciphertext, paddedPlaintext)
+  stream.XORKeyStream(ciphertext, plaintext)
 
   // get slices of the entire content and the signature
-  content := output[:SaltSize + aes.BlockSize + len(paddedPlaintext)]
+  content := output[:SaltSize + aes.BlockSize + len(plaintext)]
   signature := output[len(output) - SignatureSize:]
 
   // sign the content and store the signature at the end
@@ -281,13 +234,10 @@ func decrypt(data []byte, password string) ([]byte, error) {
   block, err := aes.NewCipher(key)
   if err != nil { return nil, err }
 
-  paddedPlaintext := make([]byte, len(ciphertext))
+  // decrypt directly into the ciphertext
+  plaintext := ciphertext[:]
   stream := cipher.NewCFBDecrypter(block, iv)
-  stream.XORKeyStream(paddedPlaintext, ciphertext)
-
-  // unpad the plaintext
-  plaintext, err := unpad(paddedPlaintext)
-  if err != nil { return nil, err }
+  stream.XORKeyStream(plaintext, ciphertext)
 
   return plaintext, nil
 }
