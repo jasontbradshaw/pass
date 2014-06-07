@@ -10,7 +10,7 @@ import (
   "errors"
   "fmt"
   "io/ioutil"
-  js "github.com/bitly/go-simplejson"
+  sj "github.com/bitly/go-simplejson"
   "code.google.com/p/go.crypto/scrypt"
 )
 
@@ -117,18 +117,18 @@ func hashPassword(password string, salt []byte) []byte {
 }
 
 // load raw JSON from some database file bytes and a password
-func load(data []byte, password string) (*js.Json, error) {
+func load(data []byte, password string) (*sj.Json, error) {
   compressed, err := decrypt(data, password)
   if (err != nil) { return nil, err }
 
   plaintext, err := decompress(compressed)
   if (err != nil) { return nil, err }
 
-  return js.NewJson(plaintext)
+  return sj.NewJson(plaintext)
 }
 
 // given JSON, encrypt it to our database format using a password
-func dump(data *js.Json, password string) ([]byte, error) {
+func dump(data *sj.Json, password string) ([]byte, error) {
   json, err := data.Encode()
   if (err != nil) { return nil, err }
 
@@ -140,12 +140,12 @@ func dump(data *js.Json, password string) ([]byte, error) {
 
 func main() {
   // some test database data
-  data := js.New()
+  data := sj.New()
   data.Set("hello", "world")
   data.Set("foo", 1)
   data.Set("bar", 2.25)
   data.Set("baz", true)
-  data.Set("pants", js.New());
+  data.Set("pants", sj.New());
   data.Get("pants").Set("something_else", false)
   data.Get("pants").Set("bad", nil)
 
