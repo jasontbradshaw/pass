@@ -8,7 +8,6 @@ import (
   "crypto/cipher"
   "crypto/rand"
   "crypto/sha256"
-  "errors"
   "fmt"
   "io/ioutil"
   sj "github.com/bitly/go-simplejson"
@@ -79,7 +78,7 @@ func compress(data []byte) ([]byte, error) {
 func decompress(data []byte) ([]byte, error) {
   // make sure we get non-empty data
   if len(data) < minCompressedLength {
-    err := fmt.Errorf("Data is too short to be valid (min length: %d",
+    err := fmt.Errorf("Data is too short to be valid (min length: %d)",
         minCompressedLength)
     return nil, err
   }
@@ -202,7 +201,17 @@ func verify(signedData []byte) ([]byte, error) {
   return data, nil
 }
 
-// encrypt some data using the given password
+// given a password string and a salt, return the hashed variant
+func hashPassword(password string, salt []byte, iterations int) []byte {
+  // create a 32-byte key for use with AES-256
+  keySize := 32
+
+  // get the result and return it
+  hash, _ := scrypt.Key([]byte(password), salt, iterations, 16, 2, keySize)
+  return hash
+}
+
+// encrypt some data using the given password and return the result
 func encrypt(plaintext []byte, password string) ([]byte, error) {
   // pad the plaintext to a multiple of the AES block size (see:
   // http://security.stackexchange.com/a/31657,
@@ -213,9 +222,14 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   // create the parts of the result byte array we need. overall output is the
   // salt, followed by the IV, followed by the ciphertext, followed by the
   // signature of the ciphertext.
-  salt := make([]byte, SaltSize)
-  iv := make([]byte, aes.BlockSize)
-  ciphertext := make([]byte, len(paddedPlaintext))
+  output := make([]byte,
+      SaltSize + aes.BlockSize + len(paddedPlaintext) + SignatureSize)
+
+  // slice out the pieces we'll be working with
+  salt := output[:SaltSize]
+  iv := output[SaltSize:SaltSize + aes.BlockSize]
+  ciphertext := output[SaltSize + aes.BlockSize:
+      SaltSize + aes.BlockSize + len(paddedPlaintext)]
 
   // randomize the salt and the IV
   if _, err := rand.Read(salt); err != nil { return nil, err }
@@ -231,14 +245,12 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   stream := cipher.NewCFBEncrypter(block, iv)
   stream.XORKeyStream(ciphertext, paddedPlaintext)
 
-  // concatenate all the parts together into a single array
-  output := salt
-  output = append(output, iv...)
-  output = append(output, ciphertext...)
+  // get slices of the entire content and the signature
+  content := output[:SaltSize + aes.BlockSize + len(paddedPlaintext)]
+  signature := output[len(output) - SignatureSize:]
 
-  // sign the entire output and append the signature
-  signature := sign(output)
-  output = append(output, signature...)
+  // sign the content and store the signature at the end
+  copy(signature, sign(content))
 
   return output, nil
 }
@@ -246,8 +258,11 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
 // decrypt some data using the given password
 func decrypt(data []byte, password string) ([]byte, error) {
   // make sure our data is of at least the minimum length
-  if len(data) < SaltSize + aes.BlockSize + SignatureSize {
-    return nil, errors.New("Data too short to be valid")
+  minEncryptedLength := SaltSize + aes.BlockSize + SignatureSize
+  if len(data) < minEncryptedLength {
+    err := fmt.Errorf("Data is too short to be valid (min length: %d)",
+        minEncryptedLength)
+    return nil, err
   }
 
   // verify the integrity of the data and get the data itself back
@@ -275,16 +290,6 @@ func decrypt(data []byte, password string) ([]byte, error) {
   if err != nil { return nil, err }
 
   return plaintext, nil
-}
-
-// given a password string and a salt, return the hashed variant
-func hashPassword(password string, salt []byte, iterations int) []byte {
-  // create a 32-byte key for use with AES-256
-  keySize := 32
-
-  // get the result and return it
-  hash, _ := scrypt.Key([]byte(password), salt, iterations, 16, 2, keySize)
-  return hash
 }
 
 // load raw JSON from some database file bytes and a password
