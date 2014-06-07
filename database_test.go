@@ -30,9 +30,37 @@ func skipIfShort(t *testing.T) {
   if (testing.Short()) { t.Skip("Skipping test in short mode") }
 }
 
-// shouldn't be able to decompress empty data
-func TestDecompressEmpty(t *testing.T) {
-  _, err := decompress(EmptyData)
+// should be able to decompress the compressed empty array
+func TestDecompressMinCompressed(t *testing.T) {
+  minCompressed, err := compress([]byte{})
+  assert.NoError(t, err)
+
+  decompressed, err := decompress(minCompressed)
+  assert.NoError(t, err)
+
+  assert.Equal(t, decompressed, EmptyData);
+}
+
+func TestDecompressTooShort(t *testing.T) {
+  minCompressed, err := compress([]byte{})
+  assert.NoError(t, err)
+
+  minCompressedLength := len(minCompressed)
+
+  // check all possible sizes below the minimum compressed length to ensure that
+  // they error.
+  for size := len(minCompressed) - 1; size >= 0; size-- {
+    _, err := decompress(make([]byte, minCompressedLength))
+    assert.Error(t, err)
+  }
+}
+
+// decompressing invalid data should fail
+func TestDecompressInvalid(t *testing.T) {
+  // null data is certainly invalid
+  data := make([]byte, 50)
+
+  _, err := decompress(data)
   assert.Error(t, err)
 }
 
@@ -144,7 +172,6 @@ func TestPad(t *testing.T) {
   for _, data := range AllData {
     for blockSize := 1; blockSize < 255; blockSize++ {
       padded, err := pad(data, blockSize)
-
       assert.NoError(t, err)
 
       // make sure the padded data is an integer multiple of the block size
@@ -162,16 +189,68 @@ func TestPad(t *testing.T) {
   }
 }
 
+// unpadding empty data should return empty data
+func TestUnpadEmpty(t *testing.T) {
+  unpadded, err := unpad(EmptyData)
+  assert.NoError(t, err)
+
+  assert.Equal(t, unpadded, EmptyData)
+}
+
+// unpadding data that's only padding should return empty data
+func TestUnpadNoData(t *testing.T) {
+  padded := []byte{3, 3, 3}
+
+  unpadded, err := unpad(padded)
+  assert.NoError(t, err)
+
+  assert.Equal(t, unpadded, EmptyData)
+}
+
+// unpadding data with only a single byte of padding should produce empty data
+func TestUnpadSinglePadding(t *testing.T) {
+  padded := []byte{1}
+
+  unpadded, err := unpad(padded)
+  assert.NoError(t, err)
+
+  assert.Equal(t, unpadded, EmptyData)
+}
+
+// unpadding data with a padding amount of 0 should be an error
+func TestUnpadZeroPadding(t *testing.T) {
+  padded := []byte{0}
+
+  _, err := unpad(padded)
+  assert.Error(t, err)
+}
+
+// pad and unpad all of our data and make sure the unpadded data is the same as
+// the original data.
+func TestPadAndUnpad(t *testing.T) {
+  for _, data := range AllData {
+    for blockSize := 1; blockSize < 255; blockSize++ {
+      padded, err := pad(data, blockSize)
+      assert.NoError(t, err)
+
+      unpadded, err := unpad(padded)
+      assert.NoError(t, err)
+
+      assert.Equal(t, unpadded, data)
+    }
+  }
+}
+
 // fuzz test padding with lots of random data
 func TestFuzzPadAndUnpad(t *testing.T) {
   skipIfShort(t)
 
-  for i := 0; i < 10000; i++ {
+  for i := 0; i < 100000; i++ {
     // create a randomly-sized array, possibly larger than a byte in length
     size, err := rand.Int(rand.Reader, big.NewInt(512))
     assert.NoError(t, err)
 
-    // create a random block size, from the min (0) up the the max (255)
+    // create a random block size, from the min (1) up the the max (255)
     blockSizeLarge, err := rand.Int(rand.Reader, big.NewInt(254))
     assert.NoError(t, err)
     blockSize := int(blockSizeLarge.Int64()) + 1
@@ -185,16 +264,8 @@ func TestFuzzPadAndUnpad(t *testing.T) {
     padded, err := pad(data, blockSize)
     assert.NoError(t, err)
 
-    // make sure all padding bytes are equal to the final byte
-    finalByte := padded[len(padded) - 1]
-    for _, b := range padded[len(padded) - int(finalByte):] {
-      assert.Equal(t, b, finalByte)
-    }
-
-    // make sure all the original bytes are included in the padded output
-    assert.Equal(t, data, padded[:len(data)])
-
-    unpadded := unpad(padded)
+    unpadded, err := unpad(padded)
+    assert.NoError(t, err)
 
     assert.Equal(t, unpadded, data)
   }

@@ -6,9 +6,10 @@ import (
   "compress/gzip"
   "crypto/aes"
   "crypto/cipher"
-  "crypto/sha256"
   "crypto/rand"
+  "crypto/sha256"
   "errors"
+  "fmt"
   "io/ioutil"
   sj "github.com/bitly/go-simplejson"
   "code.google.com/p/go.crypto/scrypt"
@@ -44,6 +45,12 @@ const SignatureSize = sha256.Size
 // the number of iterations to use when hashing the master password
 const HashIterations = 32768
 
+// this is the smallest length of compressed content we can generate, the result
+// of using our compression function on an empty input array. for reference, the
+// minimum compressed bytes are:
+//   [31 139 8 0 0 9 110 136 2 255 1 0 0 255 255 0 0 0 0 0 0 0 0]
+const minCompressedLength = 23
+
 // the database in which password data is stored, including methods for
 // loading, reading, modifying, and storing it.
 type Database struct {
@@ -71,7 +78,11 @@ func compress(data []byte) ([]byte, error) {
 // decompress some data compressed by the GZip algorithm
 func decompress(data []byte) ([]byte, error) {
   // make sure we get non-empty data
-  if len(data) == 0 { return nil, errors.New("Invalid data") }
+  if len(data) < minCompressedLength {
+    err := fmt.Errorf("Data is too short to be valid (min length: %d",
+        minCompressedLength)
+    return nil, err
+  }
 
   b := bytes.NewBuffer(data)
   reader, err := gzip.NewReader(b)
@@ -93,7 +104,9 @@ func decompress(data []byte) ([]byte, error) {
 func pad(data []byte, blockSize int) ([]byte, error) {
   // make sure we get a block size that fits into a single byte
   if blockSize <= 0 || blockSize > 255 {
-    return nil, errors.New("Block size must fit into a single byte (0 to 255)")
+    err := fmt.Errorf(
+        "Block size must fit into a single byte (0 to 255); got: %d", blockSize)
+    return nil, err
   }
 
   // calculate the number of bytes that need to be added to bring the length
@@ -114,15 +127,20 @@ func pad(data []byte, blockSize int) ([]byte, error) {
 }
 
 // given some padded data, return the data sans the included padding
-func unpad(data []byte) []byte {
+func unpad(data []byte) ([]byte, error) {
   // if we got no data, return what we got
-  if len(data) == 0 { return data }
+  if len(data) == 0 { return data, nil }
 
   // get the number of padding bytes (always stored in the final byte)
   padLength := data[len(data) - 1]
 
+  // erro if we got a zero padding length
+  if padLength == 0 {
+    return nil, fmt.Errorf("Invalid padding amount: %d" + string(padLength))
+  }
+
   // return the data without the included padding
-  return data[:-padLength]
+  return data[:len(data) - int(padLength)], nil
 }
 
 // get the signature of the given data as a byte array
@@ -151,8 +169,12 @@ func sign(data []byte) []byte {
 // pass the checksum, returns an error.
 func verify(signedData []byte) ([]byte, error) {
   // make sure the data is long enough
-  if len(signedData) < sha256.Size {
-    return nil, errors.New("Data is too short to have a valid signature")
+  minLength := sha256.Size
+  if len(signedData) < minLength {
+    err := fmt.Errorf(
+        "Data is too short to have a valid signature (minimum length: %d",
+        minLength)
+    return nil, err
   }
 
   // get the signature from the end of the data
@@ -163,7 +185,7 @@ func verify(signedData []byte) ([]byte, error) {
   signature := getSignature(data)
 
   // securely compare the signatures to determine validity. it's important that
-  // we don't bail on the comparison early to avoid timing attacks!
+  // we don't bail on the comparison early in order to avoid timing attacks!
   valid := true
   for i := 0; i < len(signature); i++ {
     valid = valid && (signature[i] == suppliedSignature[i])
@@ -171,7 +193,9 @@ func verify(signedData []byte) ([]byte, error) {
 
   // signal an error if the computed signature doesn't match the given one
   if !valid {
-    return nil, errors.New("Computed and supplied signatures do not match")
+    err := fmt.Errorf("Signatures do not match (supplied: %v; computed: %v)",
+        suppliedSignature, signature)
+    return nil, err
   }
 
   // return the data without the signature
@@ -247,7 +271,8 @@ func decrypt(data []byte, password string) ([]byte, error) {
   stream.XORKeyStream(paddedPlaintext, ciphertext)
 
   // unpad the plaintext
-  plaintext := unpad(paddedPlaintext)
+  plaintext, err := unpad(paddedPlaintext)
+  if err != nil { return nil, err }
 
   return plaintext, nil
 }
