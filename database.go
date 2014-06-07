@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
   "bytes"
@@ -6,16 +6,16 @@ import (
   "compress/gzip"
   "crypto/aes"
   "crypto/cipher"
+  "crypto/sha256"
   "crypto/rand"
   "errors"
-  "fmt"
   "io/ioutil"
   sj "github.com/bitly/go-simplejson"
   "code.google.com/p/go.crypto/scrypt"
 )
 
 // IMPLEMENTATION NOTES:
-// - HAVE LOTS OF TESTS!!! especially around database loading/saving/stability
+// - BUILD LOTS OF TESTS, especially around database loading/saving/durability
 // - encrypt PII separately from the main database
 // - decrypt once to get all non-PII with encrypted PII, then decrypt each
 //   individual PII (passwords, custom fields, etc.) as needed. this should
@@ -38,8 +38,21 @@ import (
 // the size of the salt data that's pre-pended to the encrypted data
 const SaltSize = 32
 
+// the size of the signature appended to signed data
+const SignatureSize = sha256.Size
+
 // the number of iterations to use when hashing the master password
 const HashIterations = 32768
+
+// the database in which password data is stored, including methods for
+// loading, reading, modifying, and storing it.
+type Database struct {
+  // where the database is currently stored on disk
+  Location string
+
+  // the internal data storage format, as JSON
+  data *sj.Json
+}
 
 // compress some data using the GZip algorithm
 func compress(data []byte) ([]byte, error) {
@@ -57,6 +70,9 @@ func compress(data []byte) ([]byte, error) {
 
 // decompress some data compressed by the GZip algorithm
 func decompress(data []byte) ([]byte, error) {
+  // make sure we get non-empty data
+  if len(data) == 0 { return nil, errors.New("Invalid data") }
+
   b := bytes.NewBuffer(data)
   reader, err := gzip.NewReader(b)
 
@@ -72,26 +88,27 @@ func decompress(data []byte) ([]byte, error) {
 
 // given some data, pad it to the given block size. if the data is already a
 // multiple of the given blocksize, adds another block of padding. the padding
-// is added to the end of the original data. the padding consists of secure
-// random bytes, with the final byte indicating the amount of padding that was
-// added, the count byte included.
-func pad(data []byte, blockSize uint8) ([]byte, error) {
-  // determine how much padding we need to add. if the data's length is already
-  // a multiple of the block size, a full block of padding will be added.
-  padMod := uint8(len(data)) % blockSize
-  padLength := padMod
-  if padLength == 0 { padLength = blockSize }
+// is added to the end of the original data. the padding consists of bytes that
+// are given a value equal to the number of bytes added as padding.
+func pad(data []byte, blockSize int) ([]byte, error) {
+  // make sure we get a block size that fits into a single byte
+  if blockSize <= 0 || blockSize > 255 {
+    return nil, errors.New("Block size must fit into a single byte (0 to 255)")
+  }
+
+  // calculate the number of bytes that need to be added to bring the length
+  // to an integer multiple of the block size. see:
+  // http://tools.ietf.org/html/rfc5652#section-6.3
+  padLength := blockSize - (len(data) % blockSize)
 
   // fill the first part of the padded data with the original data
-  paddedData := make([]byte, len(data) + int(padLength))
+  paddedData := make([]byte, len(data) + padLength)
   copy(paddedData, data)
 
-  // fill the padding with random bytes
-  padding := paddedData[len(data):]
-  if _, err := rand.Read(padding); err != nil { return nil, err }
-
-  // set the last byte to the amount of padding that was just added
-  padding[padLength - 1] = padLength
+  // fill the padding with bytes of value equal to the amount of padding added
+  for i := len(data); i < len(paddedData); i++ {
+    paddedData[i] = byte(padLength)
+  }
 
   return paddedData, nil
 }
@@ -102,10 +119,63 @@ func unpad(data []byte) []byte {
   if len(data) == 0 { return data }
 
   // get the number of padding bytes (always stored in the final byte)
-  padLength := uint8(data[len(data) - 1])
+  padLength := data[len(data) - 1]
 
   // return the data without the included padding
   return data[:-padLength]
+}
+
+// get the signature of the given data as a byte array
+func getSignature(data []byte) []byte {
+  // hash the data
+  signature32 := sha256.Sum256(data)
+  return []byte(signature32[:])
+}
+
+// sign some data with SHA-256 and return the original data with the signature
+// appended.
+func sign(data []byte) []byte {
+  // hash the data
+  signature := getSignature(data)
+
+  // copy the data and signature into a new array
+  signedData := make([]byte, len(data) + sha256.Size)
+  copy(signedData, data)
+  copy(signedData[len(signedData) - sha256.Size:], signature)
+
+  return signedData
+}
+
+// verify that the SHA-256 signature at the end of the given data is valid, then
+// return the verified data with the signature stripped off. if the data doesn't
+// pass the checksum, returns an error.
+func verify(signedData []byte) ([]byte, error) {
+  // make sure the data is long enough
+  if len(signedData) < sha256.Size {
+    return nil, errors.New("Data is too short to have a valid signature")
+  }
+
+  // get the signature from the end of the data
+  suppliedSignature := signedData[len(signedData) - sha256.Size:]
+  data := signedData[:len(signedData) - sha256.Size]
+
+  // sign the data once more
+  signature := getSignature(data)
+
+  // securely compare the signatures to determine validity. it's important that
+  // we don't bail on the comparison early to avoid timing attacks!
+  valid := true
+  for i := 0; i < len(signature); i++ {
+    valid = valid && (signature[i] == suppliedSignature[i])
+  }
+
+  // signal an error if the computed signature doesn't match the given one
+  if !valid {
+    return nil, errors.New("Computed and supplied signatures do not match")
+  }
+
+  // return the data without the signature
+  return data, nil
 }
 
 // encrypt some data using the given password
@@ -116,13 +186,12 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   paddedPlaintext, err := pad(plaintext, aes.BlockSize)
   if err != nil { return nil, err }
 
-  // overall output is the salt, followed by the IV, followed by the ciphertext
-  output := make([]byte, SaltSize + aes.BlockSize + len(paddedPlaintext))
-
-  // get the parts of the result byte array we need as slices
-  salt := output[:SaltSize]
-  iv := output[SaltSize:SaltSize + aes.BlockSize]
-  ciphertext := output[SaltSize + aes.BlockSize:]
+  // create the parts of the result byte array we need. overall output is the
+  // salt, followed by the IV, followed by the ciphertext, followed by the
+  // signature of the ciphertext.
+  salt := make([]byte, SaltSize)
+  iv := make([]byte, aes.BlockSize)
+  ciphertext := make([]byte, len(paddedPlaintext))
 
   // randomize the salt and the IV
   if _, err := rand.Read(salt); err != nil { return nil, err }
@@ -138,17 +207,30 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   stream := cipher.NewCFBEncrypter(block, iv)
   stream.XORKeyStream(ciphertext, paddedPlaintext)
 
+  // concatenate all the parts together into a single array
+  output := salt
+  output = append(output, iv...)
+  output = append(output, ciphertext...)
+
+  // sign the entire output and append the signature
+  signature := sign(output)
+  output = append(output, signature...)
+
   return output, nil
 }
 
 // decrypt some data using the given password
 func decrypt(data []byte, password string) ([]byte, error) {
-  // make sure our data is of the minimum length, at least
-  if (len(data) < SaltSize + aes.BlockSize) {
-    return nil, errors.New("data too short")
+  // make sure our data is of at least the minimum length
+  if len(data) < SaltSize + aes.BlockSize + SignatureSize {
+    return nil, errors.New("Data too short to be valid")
   }
 
-  // read the salt, IV, and ciphertext from our blob
+  // verify the integrity of the data and get the data itself back
+  data, err := verify(data)
+  if err != nil { return nil, err }
+
+  // read the salt, IV, ciphertext, and signature from the verified data
   salt := data[:SaltSize]
   iv := data[SaltSize:SaltSize + aes.BlockSize]
   ciphertext := data[SaltSize + aes.BlockSize:]
@@ -183,10 +265,10 @@ func hashPassword(password string, salt []byte, iterations int) []byte {
 // load raw JSON from some database file bytes and a password
 func load(data []byte, password string) (*sj.Json, error) {
   compressed, err := decrypt(data, password)
-  if (err != nil) { return nil, err }
+  if err != nil { return nil, err }
 
   plaintext, err := decompress(compressed)
-  if (err != nil) { return nil, err }
+  if err != nil { return nil, err }
 
   return sj.NewJson(plaintext)
 }
@@ -194,33 +276,10 @@ func load(data []byte, password string) (*sj.Json, error) {
 // given JSON, encrypt it to our database format using a password
 func dump(data *sj.Json, password string) ([]byte, error) {
   json, err := data.Encode()
-  if (err != nil) { return nil, err }
+  if err != nil { return nil, err }
 
   compressed, err := compress(json)
-  if (err != nil) { return nil, err }
+  if err != nil { return nil, err }
 
   return encrypt(compressed, password)
-}
-
-func main() {
-  // some test database data
-  data := sj.New()
-  data.Set("hello", "world")
-  data.Set("foo", 1)
-  data.Set("bar", 2.25)
-  data.Set("baz", true)
-  data.Set("pants", sj.New());
-  data.Get("pants").Set("something_else", false)
-  data.Get("pants").Set("bad", nil)
-
-  password := "password123"
-  plaintext := []byte("hello, world!")
-  fmt.Printf("plaintext:\t%s\n", plaintext)
-
-  ciphertext, _ := encrypt(plaintext, password)
-  fmt.Printf("ciphertext:\t%#v\n", ciphertext)
-
-  deciphertext, _ := decrypt(ciphertext, password)
-  fmt.Printf("deciphertext:\t%#v\n", deciphertext)
-  fmt.Printf("new plaintext:\t%s\n", deciphertext)
 }
