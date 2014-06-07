@@ -70,10 +70,54 @@ func decompress(data []byte) ([]byte, error) {
   return result, nil
 }
 
+// given some data, pad it to the given block size. if the data is already a
+// multiple of the given blocksize, adds another block of padding. the padding
+// is added to the end of the original data. the padding consists of secure
+// random bytes, with the final byte indicating the amount of padding that was
+// added, the count byte included.
+func pad(data []byte, blockSize uint8) ([]byte, error) {
+  // determine how much padding we need to add. if the data's length is already
+  // a multiple of the block size, a full block of padding will be added.
+  padMod := uint8(len(data)) % blockSize
+  padLength := padMod
+  if padLength == 0 { padLength = blockSize }
+
+  // fill the first part of the padded data with the original data
+  paddedData := make([]byte, len(data) + int(padLength))
+  copy(paddedData, data)
+
+  // fill the padding with random bytes
+  padding := paddedData[len(data):]
+  if _, err := rand.Read(padding); err != nil { return nil, err }
+
+  // set the last byte to the amount of padding that was just added
+  padding[padLength - 1] = padLength
+
+  return paddedData, nil
+}
+
+// given some padded data, return the data sans the included padding
+func unpad(data []byte) []byte {
+  // if we got no data, return what we got
+  if len(data) == 0 { return data }
+
+  // get the number of padding bytes (always stored in the final byte)
+  padLength := uint8(data[len(data) - 1])
+
+  // return the data without the included padding
+  return data[:-padLength]
+}
+
 // encrypt some data using the given password
 func encrypt(plaintext []byte, password string) ([]byte, error) {
+  // pad the plaintext to a multiple of the AES block size (see:
+  // http://security.stackexchange.com/a/31657,
+  // http://tools.ietf.org/html/rfc5652#section-6.3).
+  paddedPlaintext, err := pad(plaintext, aes.BlockSize)
+  if err != nil { return nil, err }
+
   // overall output is the salt, followed by the IV, followed by the ciphertext
-  output := make([]byte, SaltSize + aes.BlockSize + len(plaintext))
+  output := make([]byte, SaltSize + aes.BlockSize + len(paddedPlaintext))
 
   // get the parts of the result byte array we need as slices
   salt := output[:SaltSize]
@@ -92,7 +136,7 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   if err != nil { return nil, err }
 
   stream := cipher.NewCFBEncrypter(block, iv)
-  stream.XORKeyStream(ciphertext, plaintext)
+  stream.XORKeyStream(ciphertext, paddedPlaintext)
 
   return output, nil
 }
@@ -116,9 +160,12 @@ func decrypt(data []byte, password string) ([]byte, error) {
   block, err := aes.NewCipher(key)
   if err != nil { return nil, err }
 
-  plaintext := make([]byte, len(ciphertext))
+  paddedPlaintext := make([]byte, len(ciphertext))
   stream := cipher.NewCFBDecrypter(block, iv)
-  stream.XORKeyStream(plaintext, ciphertext)
+  stream.XORKeyStream(paddedPlaintext, ciphertext)
+
+  // unpad the plaintext
+  plaintext := unpad(paddedPlaintext)
 
   return plaintext, nil
 }
