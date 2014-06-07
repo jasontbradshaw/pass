@@ -96,9 +96,9 @@ func decompress(data []byte) ([]byte, error) {
   return result, nil
 }
 
-// get the signature of the given data as a byte array
+// get the signature of the given data as a byte array using SHA-256. the
+// returned byte array will have a length of SignatureSize.
 func getSignature(data []byte) []byte {
-  // hash the data
   signature32 := sha256.Sum256(data)
   return []byte(signature32[:])
 }
@@ -109,7 +109,7 @@ func sign(data []byte) []byte {
   // hash the data
   signature := getSignature(data)
 
-  // copy the data and signature into a new array
+  // copy the data and signature (in that order) into a new array
   signedData := make([]byte, len(data) + sha256.Size)
   copy(signedData, data)
   copy(signedData[len(signedData) - sha256.Size:], signature)
