@@ -38,7 +38,10 @@ import (
 // the size of the salt data that's pre-pended to the encrypted data
 const SaltSize = 32
 
-// gzip some data
+// the number of iterations to use when hashing the master password
+const HashIterations = 32768
+
+// compress some data using the GZip algorithm
 func compress(data []byte) ([]byte, error) {
   var result bytes.Buffer
   writer, err := gzip.NewWriterLevel(&result, flate.BestCompression)
@@ -52,7 +55,7 @@ func compress(data []byte) ([]byte, error) {
   return result.Bytes(), nil
 }
 
-// gunzip some data
+// decompress some data compressed by the GZip algorithm
 func decompress(data []byte) ([]byte, error) {
   b := bytes.NewBuffer(data)
   reader, err := gzip.NewReader(b)
@@ -82,7 +85,7 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   if _, err := rand.Read(iv); err != nil { return nil, err }
 
   // hash the password into an AES-256 (32-byte) key using the generated salt
-  key := hashPassword(password, salt)
+  key := hashPassword(password, salt, HashIterations)
 
   // encrypt the plaintext
   block, err := aes.NewCipher(key)
@@ -107,7 +110,7 @@ func decrypt(data []byte, password string) ([]byte, error) {
   ciphertext := data[SaltSize + aes.BlockSize:]
 
   // hash the password with the just-read salt to get the key
-  key := hashPassword(password, salt)
+  key := hashPassword(password, salt, HashIterations)
 
   // decrypt the ciphertext
   block, err := aes.NewCipher(key)
@@ -117,17 +120,16 @@ func decrypt(data []byte, password string) ([]byte, error) {
   stream := cipher.NewCFBDecrypter(block, iv)
   stream.XORKeyStream(plaintext, ciphertext)
 
-  // return the decrypted ciphertext
   return plaintext, nil
 }
 
-// given a password string, return the hashed variant
-func hashPassword(password string, salt []byte) []byte {
+// given a password string and a salt, return the hashed variant
+func hashPassword(password string, salt []byte, iterations int) []byte {
   // create a 32-byte key for use with AES-256
   keySize := 32
 
   // get the result and return it
-  hash, _ := scrypt.Key([]byte(password), salt, 32768, 16, 2, keySize)
+  hash, _ := scrypt.Key([]byte(password), salt, iterations, 16, 2, keySize)
   return hash
 }
 
