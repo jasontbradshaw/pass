@@ -266,6 +266,34 @@ func TestHashPasswordTooLargeWorkFactor(t *testing.T) {
   assert.Error(t, err)
 }
 
+// make sure encryption output is large enough to include all the needed data at
+// a minimum.
+func TestEncryptOutputLength(t *testing.T) {
+  skipIfShort(t)
+
+  for _, plaintext := range AllData {
+    encrypted, err := encrypt(plaintext, "password")
+    assert.NoError(t, err)
+
+    assert.Equal(t, len(encrypted), minEncryptedLength + len(plaintext))
+  }
+}
+
+// encrypted output should be verifiable
+func TestEncryptVerify(t *testing.T) {
+  skipIfShort(t)
+
+  for _, plaintext := range AllData {
+    encrypted, err := encrypt(plaintext, "password")
+    assert.NoError(t, err)
+
+    data, err := verify(encrypted)
+    assert.NoError(t, err)
+
+    assert.Equal(t, data, encrypted[:len(data)])
+  }
+}
+
 // BENCHMARKS
 //
 // NOTE: these tests all store a result globally to prevent the compiler from

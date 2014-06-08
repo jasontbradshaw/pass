@@ -47,32 +47,20 @@ const SignatureSize = sha256.Size
 // the work factor to use when hashing the master password. this number is used
 // as the exponent of a power of 2, which is used for the N parameter to the
 // scrypt algorithm.
-const HashWorkFactor = 16
+const HashWorkFactor = 11
 
 // the size of key to use, the number of bytes the password hasher outputs. this
 // ensures AES-256 encryption.
 const KeySize = 32
 
-// this is the smallest length of compressed content we can generate, the result
-// of using our compression function on an empty input array. for reference, the
-// minimum compressed bytes are:
-//   [31 139 8 0 0 9 110 136 2 255 1 0 0 255 255 0 0 0 0 0 0 0 0]
-const minCompressedLength = 23
-
-// the database in which password data is stored, including methods for
-// loading, reading, modifying, and storing it.
-type Database struct {
-  // where the database is currently stored on disk
-  Location string
-
-  // the internal data storage format, as JSON
-  data *sj.Json
-}
+// the minimum size of encrypted content, since it must include a password salt,
+// an initialization vector, and a SHA-256 checksum at a minimum.
+const minEncryptedLength = SaltSize + aes.BlockSize + SignatureSize
 
 // compress some data using the GZip algorithm
 func compress(data []byte) ([]byte, error) {
-  var result bytes.Buffer
-  writer, err := gzip.NewWriterLevel(&result, flate.BestCompression)
+  compressed := new(bytes.Buffer)
+  writer, err := gzip.NewWriterLevel(compressed, flate.BestCompression)
 
   if err != nil { return nil, err }
 
@@ -80,24 +68,17 @@ func compress(data []byte) ([]byte, error) {
   writer.Write(data)
   writer.Close()
 
-  return result.Bytes(), nil
+  return compressed.Bytes(), nil
 }
 
 // decompress some data compressed by the GZip algorithm
 func decompress(data []byte) ([]byte, error) {
-  // make sure we get non-empty data
-  if len(data) < minCompressedLength {
-    err := fmt.Errorf("Data is too short to be valid (min length: %d)",
-        minCompressedLength)
-    return nil, err
-  }
-
   b := bytes.NewBuffer(data)
   reader, err := gzip.NewReader(b)
 
   if err != nil { return nil, err }
 
-  // compress our data and close the reader
+  // decompress our data
   result, err := ioutil.ReadAll(reader)
   if err != nil { return nil, err }
   reader.Close()
@@ -216,6 +197,7 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   block, err := aes.NewCipher(key)
   if err != nil { return nil, err }
 
+  // use CFB mode to encrypt the data, so we don't have to pad
   stream := cipher.NewCFBEncrypter(block, iv)
   stream.XORKeyStream(ciphertext, plaintext)
 
@@ -232,7 +214,6 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
 // decrypt some data using the given password
 func decrypt(data []byte, password string) ([]byte, error) {
   // make sure our data is of at least the minimum length
-  minEncryptedLength := SaltSize + aes.BlockSize + SignatureSize
   if len(data) < minEncryptedLength {
     err := fmt.Errorf("Data is too short to be valid (min length: %d)",
         minEncryptedLength)
@@ -256,7 +237,7 @@ func decrypt(data []byte, password string) ([]byte, error) {
   block, err := aes.NewCipher(key)
   if err != nil { return nil, err }
 
-  // decrypt directly into the ciphertext
+  // decrypt directly into the ciphertext to save creating another array
   plaintext := ciphertext[:]
   stream := cipher.NewCFBDecrypter(block, iv)
   stream.XORKeyStream(plaintext, ciphertext)
