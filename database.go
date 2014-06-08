@@ -36,6 +36,7 @@ import (
 // - allow several password customization options (see
 //   http://passwordsgenerator.net), arbitrary lengths, and the ability to
 //   generate several passwords at once.
+// - include history for all modifications
 
 // the size of the salt data that's pre-pended to the encrypted data
 const SaltSize = 32
