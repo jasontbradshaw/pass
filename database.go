@@ -10,8 +10,10 @@ import (
   "crypto/sha256"
   "fmt"
   "io/ioutil"
-  sj "github.com/bitly/go-simplejson"
+  "math"
+
   "code.google.com/p/go.crypto/scrypt"
+  sj "github.com/bitly/go-simplejson"
 )
 
 // IMPLEMENTATION NOTES:
@@ -41,8 +43,14 @@ const SaltSize = 32
 // the size of the signature appended to signed data
 const SignatureSize = sha256.Size
 
-// the number of iterations to use when hashing the master password
-const HashIterations = 32768
+// the work factor to use when hashing the master password. this number is used
+// as the exponent of a power of 2, which is used for the N parameter to the
+// scrypt algorithm.
+const HashWorkFactor = 16
+
+// the size of key to use, the number of bytes the password hasher outputs. this
+// ensures AES-256 encryption.
+const KeySize = 32
 
 // this is the smallest length of compressed content we can generate, the result
 // of using our compression function on an empty input array. for reference, the
@@ -156,13 +164,24 @@ func verify(signedData []byte) ([]byte, error) {
 }
 
 // given a password string and a salt, return the hashed variant
-func hashPassword(password string, salt []byte, iterations int) []byte {
-  // create a 32-byte key for use with AES-256
-  keySize := 32
+func hashPassword(password string, salt []byte, workFactor int) ([]byte, error) {
+  minWorkFactor := 1
+  maxWorkFactor := 31
+  if workFactor < minWorkFactor || workFactor > maxWorkFactor {
+    err := fmt.Errorf("Work factor must be between %d and %d (got: %d)",
+        minWorkFactor, maxWorkFactor, workFactor)
+    return nil, err
+  }
 
-  // get the result and return it
-  hash, _ := scrypt.Key([]byte(password), salt, iterations, 16, 2, keySize)
-  return hash
+  // turn the work factor into an iteration count, which must be a power of two
+  N := int(math.Pow(2, float64(workFactor)))
+  r := 32
+  p := 4
+
+  // hash the password and return the result or an error if we got one. since
+  // scrypt is checking the paramters values for us, so we don't need to do it
+  // (see: code.google.com/p/go/source/browse/scrypt/scrypt.go?repo=crypto).
+  return scrypt.Key([]byte(password), salt, N, r, p, KeySize)
 }
 
 // encrypt some data using the given password and return the result
@@ -189,7 +208,8 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   if _, err := rand.Read(iv); err != nil { return nil, err }
 
   // hash the password into an AES-256 (32-byte) key using the generated salt
-  key := hashPassword(password, salt, HashIterations)
+  key, err := hashPassword(password, salt, HashWorkFactor)
+  if err != nil { return nil, err }
 
   // encrypt the plaintext
   block, err := aes.NewCipher(key)
@@ -228,7 +248,8 @@ func decrypt(data []byte, password string) ([]byte, error) {
   ciphertext := data[SaltSize + aes.BlockSize:]
 
   // hash the password with the just-read salt to get the key
-  key := hashPassword(password, salt, HashIterations)
+  key, err := hashPassword(password, salt, HashWorkFactor)
+  if err != nil { return nil, err }
 
   // decrypt the ciphertext
   block, err := aes.NewCipher(key)

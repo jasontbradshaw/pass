@@ -25,6 +25,11 @@ var AllData [][]byte = [][]byte{
   UnicodeData,
 }
 
+// a global result for deoptimization and a bunch of random bytes
+var deoptimizer []byte
+var randomBytes = make([]byte, 512)
+var _, _ = rand.Read(randomBytes)
+
 // skip the given test if running in short mode
 func skipIfShort(t *testing.T) {
   if (testing.Short()) { t.Skip("Skipping test in short mode") }
@@ -183,8 +188,6 @@ func TestVerifyShort(t *testing.T) {
 // signing and verifying data should work, and the result data should equal the
 // input data.
 func TestSignAndVerify(t *testing.T) {
-  skipIfShort(t)
-
   for _, data := range AllData {
     signed := sign(data)
     verified, err := verify(signed)
@@ -221,7 +224,88 @@ func TestFuzzSignAndVerify(t *testing.T) {
 // soon the signatures differ (i.e. should be robust against timing attacks).
 func TestVerifyConstantTime(t *testing.T) {
   skipIfShort(t)
+  // TODO: statistically verify verify times
+}
 
-  // TODO: build this and statistically verify the reported times
-  assert.Fail(t, "Implement this!")
+// hashed passwords should always output at the determined key size
+func TestHashPasswordSize(t *testing.T) {
+  salt := make([]byte, SaltSize)
+  for _, data := range AllData {
+    hashed, err := hashPassword(string(data), salt, 5)
+    assert.NoError(t, err)
+
+    assert.Equal(t, KeySize, len(hashed))
+  }
+}
+
+// test that the iterations parameter must be larger than 1
+func TestHashPasswordNegativeWorkFactor(t *testing.T) {
+  salt := make([]byte, SaltSize)
+  _, err := hashPassword("test", salt, -1)
+  assert.Error(t, err)
+}
+
+// test that the iterations parameter must be larger than 1
+func TestHashPasswordZeroWorkFactor(t *testing.T) {
+  salt := make([]byte, SaltSize)
+  _, err := hashPassword("test", salt, 0)
+  assert.Error(t, err)
+}
+
+// test that the iterations parameter can be 1
+func TestHashPasswordOneWorkFactor(t *testing.T) {
+  salt := make([]byte, SaltSize)
+  _, err := hashPassword("test", salt, 1)
+  assert.NoError(t, err)
+}
+
+// test that the iterations parameter must be larger than 1
+func TestHashPasswordTooLargeWorkFactor(t *testing.T) {
+  salt := make([]byte, SaltSize)
+  _, err := hashPassword("test", salt, 32)
+  assert.Error(t, err)
+}
+
+// BENCHMARKS
+//
+// NOTE: these tests all store a result globally to prevent the compiler from
+// optimizing the benchmark function call away since its result isn't being
+// used.
+
+// benchmark password hashing using the defaults used internally
+var hashPasswordBenchmarkPassword = string(randomBytes[32:64])
+var hashPasswordBenchmarkSalt = randomBytes[:SaltSize]
+func BenchmarkHashPasswordWithDefaults(b *testing.B) {
+  for i := 0; i < b.N; i++ {
+    deoptimizer, _ = hashPassword(
+        hashPasswordBenchmarkPassword,
+        hashPasswordBenchmarkSalt,
+        HashWorkFactor)
+  }
+}
+
+func BenchmarkCompress(b *testing.B) {
+  for i := 0; i < b.N; i++ {
+    deoptimizer, _ = compress(randomBytes)
+  }
+}
+
+var decompressBenchmarkData, _ = compress(randomBytes)
+func BenchmarkDecompress(b *testing.B) {
+  for i := 0; i < b.N; i++ {
+    deoptimizer, _ = decompress(decompressBenchmarkData)
+  }
+}
+
+func BenchmarkSign(b *testing.B) {
+  for i := 0; i < b.N; i++ {
+    deoptimizer = sign(randomBytes)
+  }
+}
+
+var verifyBenchmarkData = sign(randomBytes)
+func BenchmarkVerify(b *testing.B) {
+  for i := 0; i < b.N; i++ {
+    deoptimizer, _ = verify(verifyBenchmarkData)
+  }
 }
