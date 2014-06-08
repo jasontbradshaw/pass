@@ -95,6 +95,10 @@ func getSignature(data []byte) []byte {
 
 // sign some data with SHA-256 and return the original data with the signature
 // appended.
+// FIXME: CRITICAL! this needs to use HMAC-SHA512 as described here:
+// blog.agilebits.com/2013/03/09/guess-why-were-moving-to-256-bit-aes-keys/
+// otherwise, tampering may take place since we can't guarantee that the given
+// database is the one we originally signed!
 func sign(data []byte) []byte {
   // hash the data
   signature := getSignature(data)
