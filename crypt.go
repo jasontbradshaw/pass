@@ -1,4 +1,4 @@
-package database
+package pass
 
 import (
   "bytes"
@@ -14,7 +14,6 @@ import (
   "math"
 
   "code.google.com/p/go.crypto/scrypt"
-  sj "github.com/bitly/go-simplejson"
 )
 
 // IMPLEMENTATION NOTES:
@@ -268,26 +267,4 @@ func decrypt(data []byte, password string) ([]byte, error) {
   stream.XORKeyStream(plaintext, ciphertext)
 
   return plaintext, nil
-}
-
-// load raw JSON from some database file bytes and a password
-func load(data []byte, password string) (*sj.Json, error) {
-  compressed, err := decrypt(data, password)
-  if err != nil { return nil, err }
-
-  plaintext, err := decompress(compressed)
-  if err != nil { return nil, err }
-
-  return sj.NewJson(plaintext)
-}
-
-// given JSON, encrypt it to our database format using a password
-func dump(data *sj.Json, password string) ([]byte, error) {
-  json, err := data.Encode()
-  if err != nil { return nil, err }
-
-  compressed, err := compress(json)
-  if err != nil { return nil, err }
-
-  return encrypt(compressed, password)
 }
