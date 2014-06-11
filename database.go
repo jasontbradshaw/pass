@@ -39,8 +39,6 @@ import (
 //   generate several passwords at once.
 // - include history for all modifications
 
-// TODO: make functions return specifically-sized slices for what they are doing
-
 // the size of the signature appended to signed data
 const SignatureSize = sha512.Size
 
