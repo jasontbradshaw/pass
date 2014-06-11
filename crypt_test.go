@@ -362,9 +362,9 @@ func TestEncryptOutputLength(t *testing.T) {
 // benchmark password hashing using the defaults used internally
 var hashPasswordBenchmarkPassword = string(randomBytes[32:64])
 var hashPasswordBenchmarkSalt = randomBytes[:SaltSize]
-func BenchmarkHashPasswordWithDefaults(b *testing.B) {
+func BenchmarkHashPassword(b *testing.B) {
   for i := 0; i < b.N; i++ {
-    deoptimizer, deoptimizer, _ = hashPassword(
+    deoptimizer, _, _ = hashPassword(
         hashPasswordBenchmarkPassword,
         hashPasswordBenchmarkSalt,
         HashWorkFactor)
