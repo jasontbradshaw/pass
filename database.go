@@ -49,9 +49,10 @@ const SaltSize = 32
 // AES-256 encryption (see: http://golang.org/pkg/crypto/aes/#NewCipher).
 const KeySize = 32
 
-// we want our HMAC keys to be at least as large as the blocksize (see:
-// http://stackoverflow.com/a/12207647), so we double that to get ours.
-const HMACKeySize = sha512.BlockSize * 2
+// we want our HMAC keys to the same size as the blocksize (see:
+// http://stackoverflow.com/a/12207647 and
+// http://en.wikipedia.org/wiki/Hash-based_message_authentication_code#Definition_.28from_RFC_2104.29).
+const HMACKeySize = sha512.BlockSize
 
 // the work factor to use when hashing the master password. this number is used
 // as the exponent of a power of 2, which is used for the N parameter to the
@@ -94,8 +95,13 @@ func decompress(data []byte) ([]byte, error) {
 // get the signature of the given data as a byte array using SHA-512. the
 // resulting byte array will have a length of SignatureSize.
 func getSignature(data, key []byte) ([]byte, error) {
+  // we want the key to be no shorter than the hash algorithm's block size,
+  // otherwise it will be zero-padded. longer keys are hashed to obtain a key of
+  // the same size as the block size, so there's really no benefit in using a
+  // key size that's not equal to the block size of the hash algorithm. it
+  // doesn't hurt, however, so we let that case alone.
   if len(key) < HMACKeySize {
-    err := fmt.Errorf("Key size is too small (must be at least %d bytes)",
+    err := fmt.Errorf("Key size is too small (should be %d bytes)",
         HMACKeySize)
     return nil, err
   }

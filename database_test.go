@@ -128,6 +128,16 @@ func TestGetSignatureMinLengthKey(t *testing.T) {
   assert.NoError(t, err)
 }
 
+// make sure that trying to sign with a key that's longer than the minimum
+// produces no errors.
+func TestGetSignatureLongKey(t *testing.T) {
+  for keySize := HMACKeySize; keySize < HMACKeySize * 2; keySize++ {
+    key := make([]byte, keySize)
+    _, err := getSignature(LongData, key)
+    assert.NoError(t, err)
+  }
+}
+
 // make sure that signing a block of bytes always produces a signature of the
 // correct length.
 func TestGetSignatureSize(t *testing.T) {
@@ -259,11 +269,8 @@ func TestFuzzSignAndVerify(t *testing.T) {
   skipIfShort(t)
 
   for i := 0; i < 100000; i++ {
-    // create a randomly-sized array and key
+    // create a randomly-sized data array
     size, err := rand.Int(rand.Reader, big.NewInt(512))
-    assert.NoError(t, err)
-
-    keySize, err := rand.Int(rand.Reader, big.NewInt(64))
     assert.NoError(t, err)
 
     // fill the array and key with random data
@@ -271,7 +278,7 @@ func TestFuzzSignAndVerify(t *testing.T) {
     _, err = rand.Read(data)
     assert.NoError(t, err)
 
-    key := make([]byte, keySize.Int64())
+    key := make([]byte, HMACKeySize)
     _, err = rand.Read(key)
     assert.NoError(t, err)
 
@@ -290,7 +297,7 @@ func TestFuzzSignAndVerify(t *testing.T) {
 // soon the signatures differ (i.e. should be robust against timing attacks).
 func TestVerifyConstantTime(t *testing.T) {
   skipIfShort(t)
-  // TODO: statistically verify verify times
+  // TODO: statistically verify verification time
 }
 
 // hashed passwords should always output hashes of the determined key sizes
