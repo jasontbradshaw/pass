@@ -30,6 +30,9 @@ var deoptimizer []byte
 var randomBytes = make([]byte, 512)
 var _, _ = rand.Read(randomBytes)
 
+// we do a lot of signing tests and need a key of a specific length for them
+var hmacKeyData []byte = randomBytes[:HMACKeySize]
+
 // skip the given test if running in short mode
 func skipIfShort(t *testing.T) {
   if (testing.Short()) { t.Skip("Skipping test in short mode") }
@@ -109,12 +112,43 @@ func TestFuzzCompressAndDecompress(t *testing.T) {
   }
 }
 
-// make sure that signing identical blocks of bytes always produces a signature
-// of the reported length.
+// make sure that trying to sign with a key that's too short produces errors
+func TestGetSignatureShortKey(t *testing.T) {
+  for keySize := 0; keySize < HMACKeySize - 1; keySize++ {
+    key := make([]byte, keySize)
+    _, err := getSignature(LongData, key)
+    assert.Error(t, err)
+  }
+}
+
+// trying to sign with a key that's long enough should produce no errors
+func TestGetSignatureMinLengthKey(t *testing.T) {
+  key := make([]byte, HMACKeySize)
+  _, err := getSignature(LongData, key)
+  assert.NoError(t, err)
+}
+
+// make sure that signing a block of bytes always produces a signature of the
+// correct length.
 func TestGetSignatureSize(t *testing.T) {
   for _, data := range AllData {
-    signature := getSignature(data)
+    signature, err := getSignature(data, hmacKeyData)
+    assert.NoError(t, err)
+
     assert.Equal(t, len(signature), SignatureSize)
+  }
+}
+
+// make sure that signing a block of bytes always produces a signature that's
+// not just full of null bytes. a null signature is technically possible, but
+// it's vastly, vastly more likeky to be an error than a hash collision!
+func TestGetSignatureNonNull(t *testing.T) {
+  nullSignature := make([]byte, SignatureSize)
+  for _, data := range AllData {
+    signature, err := getSignature(data, hmacKeyData)
+    assert.NoError(t, err)
+
+    assert.NotEqual(t, signature, nullSignature)
   }
 }
 
@@ -125,8 +159,11 @@ func TestGetSignatureIdentical(t *testing.T) {
     copiedData := make([]byte, len(data))
     copy(copiedData, data)
 
-    signature1 := getSignature(data)
-    signature2 := getSignature(copiedData)
+    signature1, err := getSignature(data, hmacKeyData)
+    assert.NoError(t, err)
+
+    signature2, err := getSignature(copiedData, hmacKeyData)
+    assert.NoError(t, err)
 
     assert.Equal(t, signature1, signature2)
   }
@@ -139,8 +176,11 @@ func TestSignIdentical(t *testing.T) {
     copiedData := make([]byte, len(data))
     copy(copiedData, data)
 
-    signed1 := sign(data)
-    signed2 := sign(copiedData)
+    signed1, err := sign(data, hmacKeyData)
+    assert.NoError(t, err)
+
+    signed2, err := sign(copiedData, hmacKeyData)
+    assert.NoError(t, err)
 
     assert.Equal(t, signed1, signed2)
   }
@@ -150,7 +190,8 @@ func TestSignIdentical(t *testing.T) {
 // data plus the size of a signature.
 func TestSignLength(t *testing.T) {
   for _, data := range AllData {
-    signed := sign(data)
+    signed, err := sign(data, hmacKeyData)
+    assert.NoError(t, err)
     assert.Equal(t, len(signed), len(data) + SignatureSize)
   }
 }
@@ -158,29 +199,43 @@ func TestSignLength(t *testing.T) {
 // make sure that signed data always starts with the original data
 func TestSignStartsWithOriginalData(t *testing.T) {
   for _, data := range AllData {
-    signed := sign(data)
+    signed, err := sign(data, hmacKeyData)
+    assert.NoError(t, err)
     assert.Equal(t, data, signed[:len(data)])
   }
 }
 
-// data with an invalid signature shouldn't verify
-func TestVerifyInvalid(t *testing.T) {
+// data with a null signature shouldn't verify
+func TestVerifyNullSignature(t *testing.T) {
   for _, data := range AllData {
     // create a signature with all null bytes
     invalidSigned := make([]byte, len(data) + SignatureSize)
     copy(invalidSigned, data)
 
-    _, err := verify(invalidSigned)
+    _, err := verify(invalidSigned, hmacKeyData)
+    assert.Error(t, err)
+  }
+}
+
+// data with a random signature shouldn't verify
+func TestVerifyInvalidSignature(t *testing.T) {
+  for _, data := range AllData {
+    // create a signature of random bytes
+    invalidSigned := make([]byte, len(data) + SignatureSize)
+    copy(invalidSigned, data)
+    copy(invalidSigned[len(data):], randomBytes[:SignatureSize])
+
+    _, err := verify(invalidSigned, hmacKeyData)
     assert.Error(t, err)
   }
 }
 
 // data shorter than the signature length shouldn't verify
 func TestVerifyShort(t *testing.T) {
-  for i := SignatureSize; i >= 0; i-- {
+  for i := 0; i < SignatureSize; i++ {
     invalidSigned := make([]byte, i)
 
-    _, err := verify(invalidSigned)
+    _, err := verify(invalidSigned, hmacKeyData)
     assert.Error(t, err)
   }
 }
@@ -189,33 +244,44 @@ func TestVerifyShort(t *testing.T) {
 // input data.
 func TestSignAndVerify(t *testing.T) {
   for _, data := range AllData {
-    signed := sign(data)
-    verified, err := verify(signed)
-
+    signed, err := sign(data, hmacKeyData)
     assert.NoError(t, err)
+
+    verified, err := verify(signed, hmacKeyData)
+    assert.NoError(t, err)
+
     assert.Equal(t, data, verified)
   }
 }
 
-// test signing and verifying lots of random data
+// test signing and verifying lots of random data with random keys
 func TestFuzzSignAndVerify(t *testing.T) {
   skipIfShort(t)
 
   for i := 0; i < 100000; i++ {
-    // create a randomly-sized array
+    // create a randomly-sized array and key
     size, err := rand.Int(rand.Reader, big.NewInt(512))
     assert.NoError(t, err)
 
-    // fill the array with random data
+    keySize, err := rand.Int(rand.Reader, big.NewInt(64))
+    assert.NoError(t, err)
+
+    // fill the array and key with random data
     data := make([]byte, size.Int64())
     _, err = rand.Read(data)
     assert.NoError(t, err)
 
-    // sign, verify, and compare to the original
-    signed := sign(data)
-    verified, err := verify(signed)
-
+    key := make([]byte, keySize.Int64())
+    _, err = rand.Read(key)
     assert.NoError(t, err)
+
+    // sign, verify, and compare to the original
+    signed, err := sign(data, key)
+    assert.NoError(t, err)
+
+    verified, err := verify(signed, key)
+    assert.NoError(t, err)
+
     assert.Equal(t, data, verified)
   }
 }
@@ -227,42 +293,43 @@ func TestVerifyConstantTime(t *testing.T) {
   // TODO: statistically verify verify times
 }
 
-// hashed passwords should always output at the determined key size
+// hashed passwords should always output hashes of the determined key sizes
 func TestHashPasswordSize(t *testing.T) {
   salt := make([]byte, SaltSize)
   for _, data := range AllData {
-    hashed, err := hashPassword(string(data), salt, 5)
+    encryptionKey, hmacKey, err := hashPassword(string(data), salt, 5)
     assert.NoError(t, err)
 
-    assert.Equal(t, KeySize, len(hashed))
+    assert.Equal(t, KeySize, len(encryptionKey))
+    assert.Equal(t, HMACKeySize, len(hmacKey))
   }
 }
 
-// test that the iterations parameter must be larger than 1
+// test that the iterations parameter can't be negative
 func TestHashPasswordNegativeWorkFactor(t *testing.T) {
   salt := make([]byte, SaltSize)
-  _, err := hashPassword("test", salt, -1)
+  _, _, err := hashPassword("test", salt, -1)
   assert.Error(t, err)
 }
 
-// test that the iterations parameter must be larger than 1
+// test that the iterations parameter can't be zero
 func TestHashPasswordZeroWorkFactor(t *testing.T) {
   salt := make([]byte, SaltSize)
-  _, err := hashPassword("test", salt, 0)
+  _, _, err := hashPassword("test", salt, 0)
   assert.Error(t, err)
 }
 
 // test that the iterations parameter can be 1
 func TestHashPasswordOneWorkFactor(t *testing.T) {
   salt := make([]byte, SaltSize)
-  _, err := hashPassword("test", salt, 1)
+  _, _, err := hashPassword("test", salt, 1)
   assert.NoError(t, err)
 }
 
-// test that the iterations parameter must be larger than 1
+// test that the iterations parameter can't be larger than 31
 func TestHashPasswordTooLargeWorkFactor(t *testing.T) {
   salt := make([]byte, SaltSize)
-  _, err := hashPassword("test", salt, 32)
+  _, _, err := hashPassword("test", salt, 32)
   assert.Error(t, err)
 }
 
@@ -279,21 +346,6 @@ func TestEncryptOutputLength(t *testing.T) {
   }
 }
 
-// encrypted output should be verifiable
-func TestEncryptVerify(t *testing.T) {
-  skipIfShort(t)
-
-  for _, plaintext := range AllData {
-    encrypted, err := encrypt(plaintext, "password")
-    assert.NoError(t, err)
-
-    data, err := verify(encrypted)
-    assert.NoError(t, err)
-
-    assert.Equal(t, data, encrypted[:len(data)])
-  }
-}
-
 // BENCHMARKS
 //
 // NOTE: these tests all store a result globally to prevent the compiler from
@@ -305,7 +357,7 @@ var hashPasswordBenchmarkPassword = string(randomBytes[32:64])
 var hashPasswordBenchmarkSalt = randomBytes[:SaltSize]
 func BenchmarkHashPasswordWithDefaults(b *testing.B) {
   for i := 0; i < b.N; i++ {
-    deoptimizer, _ = hashPassword(
+    deoptimizer, deoptimizer, _ = hashPassword(
         hashPasswordBenchmarkPassword,
         hashPasswordBenchmarkSalt,
         HashWorkFactor)
@@ -327,13 +379,13 @@ func BenchmarkDecompress(b *testing.B) {
 
 func BenchmarkSign(b *testing.B) {
   for i := 0; i < b.N; i++ {
-    deoptimizer = sign(randomBytes)
+    deoptimizer, _ = sign(randomBytes, hmacKeyData)
   }
 }
 
-var verifyBenchmarkData = sign(randomBytes)
+var verifyBenchmarkData, _ = sign(randomBytes, hmacKeyData)
 func BenchmarkVerify(b *testing.B) {
   for i := 0; i < b.N; i++ {
-    deoptimizer, _ = verify(verifyBenchmarkData)
+    deoptimizer, _ = verify(verifyBenchmarkData, hmacKeyData)
   }
 }

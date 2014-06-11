@@ -6,8 +6,9 @@ import (
   "compress/gzip"
   "crypto/aes"
   "crypto/cipher"
+  "crypto/hmac"
   "crypto/rand"
-  "crypto/sha256"
+  "crypto/sha512"
   "fmt"
   "io/ioutil"
   "math"
@@ -38,30 +39,37 @@ import (
 //   generate several passwords at once.
 // - include history for all modifications
 
-// the size of the salt data that's pre-pended to the encrypted data
-const SaltSize = 32
+// TODO: make functions return specifically-sized slices for what they are doing
 
 // the size of the signature appended to signed data
-const SignatureSize = sha256.Size
+const SignatureSize = sha512.Size
+
+// the size of the random salt in bytes we use during password hashing
+const SaltSize = 32
+
+// the size of key to use for encryption. using 32 bytes (256 bits) selects
+// AES-256 encryption (see: http://golang.org/pkg/crypto/aes/#NewCipher).
+const KeySize = 32
+
+// we want our HMAC keys to be at least as large as the blocksize (see:
+// http://stackoverflow.com/a/12207647), so we double that to get ours.
+const HMACKeySize = sha512.BlockSize * 2
 
 // the work factor to use when hashing the master password. this number is used
 // as the exponent of a power of 2, which is used for the N parameter to the
-// scrypt algorithm.
-const HashWorkFactor = 11
-
-// the size of key to use, the number of bytes the password hasher outputs. this
-// ensures AES-256 encryption.
-const KeySize = 32
+// scrypt algorithm. we shoot for a hash time of around 1/4 second on decent
+// hardware, to keep the amount of time spent hashing from being inconvenient
+// for users.
+const HashWorkFactor = 12
 
 // the minimum size of encrypted content, since it must include a password salt,
 // an initialization vector, and a SHA-256 checksum at a minimum.
 const minEncryptedLength = SaltSize + aes.BlockSize + SignatureSize
 
-// compress some data using the GZip algorithm
+// compress some data using the GZip algorithm and return it
 func compress(data []byte) ([]byte, error) {
   compressed := new(bytes.Buffer)
   writer, err := gzip.NewWriterLevel(compressed, flate.BestCompression)
-
   if err != nil { return nil, err }
 
   // compress our data
@@ -75,7 +83,6 @@ func compress(data []byte) ([]byte, error) {
 func decompress(data []byte) ([]byte, error) {
   b := bytes.NewBuffer(data)
   reader, err := gzip.NewReader(b)
-
   if err != nil { return nil, err }
 
   // decompress our data
@@ -86,77 +93,77 @@ func decompress(data []byte) ([]byte, error) {
   return result, nil
 }
 
-// get the signature of the given data as a byte array using SHA-256. the
-// returned byte array will have a length of SignatureSize.
-func getSignature(data []byte) []byte {
-  signature32 := sha256.Sum256(data)
-  return []byte(signature32[:])
-}
-
-// sign some data with SHA-256 and return the original data with the signature
-// appended.
-// FIXME: CRITICAL! this needs to use HMAC-SHA512 as described here:
-// blog.agilebits.com/2013/03/09/guess-why-were-moving-to-256-bit-aes-keys/
-// otherwise, tampering may take place since we can't guarantee that the given
-// database is the one we originally signed!
-func sign(data []byte) []byte {
-  // hash the data
-  signature := getSignature(data)
-
-  // copy the data and signature (in that order) into a new array
-  signedData := make([]byte, len(data) + sha256.Size)
-  copy(signedData, data)
-  copy(signedData[len(signedData) - sha256.Size:], signature)
-
-  return signedData
-}
-
-// verify that the SHA-256 signature at the end of the given data is valid, then
-// return the verified data with the signature stripped off. if the data doesn't
-// pass the checksum, returns an error.
-func verify(signedData []byte) ([]byte, error) {
-  // make sure the data is long enough
-  minLength := sha256.Size
-  if len(signedData) < minLength {
-    err := fmt.Errorf(
-        "Data is too short to have a valid signature (minimum length: %d",
-        minLength)
+// get the signature of the given data as a byte array using SHA-512. the
+// resulting byte array will have a length of SignatureSize.
+func getSignature(data, key []byte) ([]byte, error) {
+  if len(key) < HMACKeySize {
+    err := fmt.Errorf("Key size is too small (must be at least %d bytes)",
+        HMACKeySize)
     return nil, err
   }
 
-  // get the signature from the end of the data
-  suppliedSignature := signedData[len(signedData) - sha256.Size:]
-  data := signedData[:len(signedData) - sha256.Size]
+  mac := hmac.New(sha512.New, key)
+  mac.Write(data)
 
-  // sign the data once more
-  signature := getSignature(data)
+  // compute and return the signature
+  return mac.Sum(nil), nil
+}
 
-  // securely compare the signatures to determine validity. it's important that
-  // we don't bail on the comparison early in order to avoid timing attacks!
-  valid := true
-  for i := 0; i < len(signature); i++ {
-    valid = valid && (signature[i] == suppliedSignature[i])
+// sign some data with HMAC-SHA512 and a key, then return the original data with
+// the signature appended.
+func sign(data, key []byte) ([]byte, error) {
+  // copy the original data into a new array
+  signedData := make([]byte, len(data))
+  copy(signedData, data)
+
+  // return the data with the signature appended
+  signature, err := getSignature(data, key)
+  if err != nil { return nil, err }
+
+  return append(signedData, signature...), nil
+}
+
+// verify that the signature at the end of the given data is valid, then return
+// the verified data with the signature stripped off. if the data doesn't
+// authenticate, returns an error.
+func verify(signedData, key []byte) ([]byte, error) {
+  // make sure the data is long enough
+  if len(signedData) < SignatureSize {
+    err := fmt.Errorf(
+        "Data is too short to have a valid signature (minimum length: %d",
+        SignatureSize)
+    return nil, err
   }
 
-  // signal an error if the computed signature doesn't match the given one
-  if !valid {
+  // stript the signature from the end of the data
+  suppliedSignature := signedData[len(signedData) - SignatureSize:]
+  data := signedData[:len(signedData) - SignatureSize]
+
+  // sign the data once more
+  signature, err := getSignature(data, key)
+  if err != nil { return nil, err }
+
+  // signal an error if the computed signature doesn't match the given one.
+  // notice that we securely compare the signatures to avoid timing attacks!
+  if !hmac.Equal(suppliedSignature, signature) {
     err := fmt.Errorf("Signatures do not match (supplied: %v; computed: %v)",
         suppliedSignature, signature)
     return nil, err
   }
 
-  // return the data without the signature
+  // return the data slice without the signature attached
   return data, nil
 }
 
-// given a password string and a salt, return the hashed variant
-func hashPassword(password string, salt []byte, workFactor int) ([]byte, error) {
+// given a password string and a salt, return two byte arrays. the first should
+// be used for encryption, the second for HMAC.
+func hashPassword(password string, salt []byte, workFactor int) ([]byte, []byte, error) {
   minWorkFactor := 1
   maxWorkFactor := 31
   if workFactor < minWorkFactor || workFactor > maxWorkFactor {
     err := fmt.Errorf("Work factor must be between %d and %d (got: %d)",
         minWorkFactor, maxWorkFactor, workFactor)
-    return nil, err
+    return nil, nil, err
   }
 
   // turn the work factor into an iteration count, which must be a power of two
@@ -164,10 +171,17 @@ func hashPassword(password string, salt []byte, workFactor int) ([]byte, error) 
   r := 32
   p := 4
 
-  // hash the password and return the result or an error if we got one. since
-  // scrypt is checking the paramters values for us, so we don't need to do it
-  // (see: code.google.com/p/go/source/browse/scrypt/scrypt.go?repo=crypto).
-  return scrypt.Key([]byte(password), salt, N, r, p, KeySize)
+  // generate enough bytes for both the encryption and HMAC keys. additionally,
+  // since scrypt is checking the sizes of the paramter values for us, we don't
+  // need to do it ourselves (see:
+  // http://code.google.com/p/go/source/browse/scrypt/scrypt.go?repo=crypto).
+  hash, err := scrypt.Key([]byte(password), salt, N, r, p, KeySize + HMACKeySize)
+  if err != nil { return nil, nil, err }
+
+  // return the keys according to our convention (encryption, then hmac)
+  encryptionKey := hash[:KeySize]
+  hmacKey := hash[KeySize:]
+  return encryptionKey, hmacKey, nil
 }
 
 // encrypt some data using the given password and return the result
@@ -194,11 +208,11 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   if _, err := rand.Read(iv); err != nil { return nil, err }
 
   // hash the password into an AES-256 (32-byte) key using the generated salt
-  key, err := hashPassword(password, salt, HashWorkFactor)
+  encryptionKey, hmacKey, err := hashPassword(password, salt, HashWorkFactor)
   if err != nil { return nil, err }
 
   // encrypt the plaintext
-  block, err := aes.NewCipher(key)
+  block, err := aes.NewCipher(encryptionKey)
   if err != nil { return nil, err }
 
   // use CFB mode to encrypt the data, so we don't have to pad
@@ -209,8 +223,12 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   content := output[:SaltSize + aes.BlockSize + len(plaintext)]
   signature := output[len(output) - SignatureSize:]
 
-  // sign the content and store the signature at the end
-  copy(signature, sign(content))
+  // sign the content
+  signatureData, err := sign(content, hmacKey)
+  if err != nil { return nil, err }
+
+  // store the signature at the end of the content
+  copy(signature, signatureData)
 
   return output, nil
 }
@@ -224,21 +242,20 @@ func decrypt(data []byte, password string) ([]byte, error) {
     return nil, err
   }
 
-  // verify the integrity of the data and get the data itself back
-  data, err := verify(data)
-  if err != nil { return nil, err }
-
-  // read the salt, IV, ciphertext, and signature from the verified data
+  // read the salt, IV, and ciphertext from the unverified data
   salt := data[:SaltSize]
   iv := data[SaltSize:SaltSize + aes.BlockSize]
-  ciphertext := data[SaltSize + aes.BlockSize:]
+  ciphertext := data[SaltSize + aes.BlockSize:len(data) - SignatureSize]
 
-  // hash the password with the just-read salt to get the key
-  key, err := hashPassword(password, salt, HashWorkFactor)
+  // hash the password with the supplied salt to get the keys
+  encryptionKey, hmacKey, err := hashPassword(password, salt, HashWorkFactor)
   if err != nil { return nil, err }
 
+  // verify the integrity of the data
+  if _, err = verify(data, hmacKey); err != nil { return nil, err }
+
   // decrypt the ciphertext
-  block, err := aes.NewCipher(key)
+  block, err := aes.NewCipher(encryptionKey)
   if err != nil { return nil, err }
 
   // decrypt directly into the ciphertext to save creating another array
