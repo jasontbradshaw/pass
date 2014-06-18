@@ -9,6 +9,7 @@ import (
   "crypto/hmac"
   "crypto/rand"
   "crypto/sha512"
+  "encoding/binary"
   "fmt"
   "io/ioutil"
   "math"
@@ -38,6 +39,17 @@ import (
 //   generate several passwords at once.
 // - include history for all modifications
 
+// TODO:
+// - store scrypt paramters with the encrypted blob for future-proofing
+// - make scrypt use at least 128Mb of memory by default, lots of CPU
+
+// the current version of the encrypted format as a byte array
+const Version uint32 = 0
+
+// how large in bytes our version number is, in bytes. a uint32 should ALWAYS be
+// 4 bytes, so we can just hard-code this here.
+const VersionSize = 4
+
 // the size of the signature appended to signed data
 const SignatureSize = sha512.Size
 
@@ -60,9 +72,9 @@ const HMACKeySize = sha512.BlockSize
 // for users.
 const HashWorkFactor = 12
 
-// the minimum size of encrypted content, since it must include a password salt,
-// an initialization vector, and a SHA-256 checksum at a minimum.
-const minEncryptedLength = SaltSize + aes.BlockSize + SignatureSize
+// the minimum size of encrypted content, since it must include a version, the
+// password salt, an initialization vector, and a signature at a minimum.
+const minEncryptedLength = VersionSize + SaltSize + aes.BlockSize + SignatureSize
 
 // compress some data using the GZip algorithm and return it
 func compress(data []byte) ([]byte, error) {
@@ -93,7 +105,7 @@ func decompress(data []byte) ([]byte, error) {
 
 // get the signature of the given data as a byte array using SHA-512. the
 // resulting byte array will have a length of SignatureSize.
-func getSignature(data, key []byte) ([]byte, error) {
+func sign(data, key []byte) ([]byte, error) {
   // we want the key to be no shorter than the hash algorithm's block size,
   // otherwise it will be zero-padded. longer keys are hashed to obtain a key of
   // the same size as the block size, so there's really no benefit in using a
@@ -112,50 +124,59 @@ func getSignature(data, key []byte) ([]byte, error) {
   return mac.Sum(nil), nil
 }
 
-// sign some data with HMAC-SHA512 and a key, then return the original data with
-// the signature appended.
-func sign(data, key []byte) ([]byte, error) {
-  // copy the original data into a new array
-  signedData := make([]byte, len(data))
-  copy(signedData, data)
-
-  // return the data with the signature appended
-  signature, err := getSignature(data, key)
-  if err != nil { return nil, err }
-
-  return append(signedData, signature...), nil
-}
-
-// verify that the signature at the end of the given data is valid, then return
-// the verified data with the signature stripped off. if the data doesn't
-// authenticate, returns an error.
-func verify(signedData, key []byte) ([]byte, error) {
-  // make sure the data is long enough
-  if len(signedData) < SignatureSize {
-    err := fmt.Errorf(
-        "Data is too short to have a valid signature (minimum length: %d",
-        SignatureSize)
-    return nil, err
+// return whether the given signature verifies the given data
+func verify(data, suppliedSignature, key []byte) error {
+  // make sure the signature is the correct size
+  if len(suppliedSignature) != SignatureSize {
+    err := fmt.Errorf("Signature must be %d bytes long (got %d)",
+        SignatureSize, len(suppliedSignature))
+    return err
   }
 
-  // stript the signature from the end of the data
-  suppliedSignature := signedData[len(signedData) - SignatureSize:]
-  data := signedData[:len(signedData) - SignatureSize]
-
-  // sign the data once more
-  signature, err := getSignature(data, key)
-  if err != nil { return nil, err }
+  // sign the data ourself
+  computedSignature, err := sign(data, key)
+  if err != nil { return err }
 
   // signal an error if the computed signature doesn't match the given one.
   // notice that we securely compare the signatures to avoid timing attacks!
-  if !hmac.Equal(suppliedSignature, signature) {
-    err := fmt.Errorf("Signatures do not match (supplied: %v; computed: %v)",
-        suppliedSignature, signature)
-    return nil, err
+  if !hmac.Equal(suppliedSignature, computedSignature) {
+    err := fmt.Errorf(
+        "Signatures do not match:\n  supplied: %v\n  computed: %v)",
+        suppliedSignature, computedSignature)
+    return err
   }
 
-  // return the data slice without the signature attached
-  return data, nil
+  // return no error since the data authenticated correctly
+  return nil
+}
+
+// encode the given version number as an array of bytes, then return the array
+// and whether there was an error.
+func versionToBytes(version uint32) ([]byte, error) {
+  buf := new(bytes.Buffer)
+  if err := binary.Write(buf, binary.BigEndian, version); err != nil {
+    return nil, err
+  }
+  return buf.Bytes(), nil
+}
+
+// read a version number from an array of bytes and return the version number
+// along with an error, if any.
+func bytesToVersion(versionBytes []byte) (uint32, error) {
+  // make sure we got enough bytes to parse a version out of them
+  if len(versionBytes) < VersionSize {
+    return 0, fmt.Errorf(
+        "Not enough bytes to contain a version (minimum: %d)", VersionSize)
+  }
+
+  // read the version from our bytes and return it
+  buf := bytes.NewBuffer(versionBytes)
+  var version uint32
+  if err := binary.Read(buf, binary.BigEndian, &version); err != nil {
+    return 0, err
+  }
+
+  return version, nil
 }
 
 // given a password string and a salt, return two byte arrays. the first should
@@ -192,25 +213,32 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   // NOTE: no plaintext padding is needed since we're using CFB mode (see:
   // http://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Padding).
 
-  // create the parts of the result byte array we need. overall output is the
-  // salt, followed by the IV, followed by the ciphertext, followed by the
-  // signature of the ciphertext.
-  output := make([]byte,
-      SaltSize + aes.BlockSize + len(plaintext) + SignatureSize)
+  // make a blob that conforms to our defined structure
+  blob := NewBlob(
+    "version", VersionSize,
+    "salt", SaltSize,
+    "iv", aes.BlockSize,
+    "data", len(plaintext),
+    "signature", SignatureSize,
+  )
 
-  // slice out the pieces we'll be working with
-  salt := output[:SaltSize]
-  iv := output[SaltSize:SaltSize + aes.BlockSize]
+  // get the slices we'll be working with
+  version := blob.Get("version")
+  salt := blob.Get("salt")
+  iv := blob.Get("iv")
+  ciphertext := blob.Get("data")
+  signature := blob.Get("signature")
 
-  // same size as the plaintext, a nice property of CFB mode
-  ciphertext := output[SaltSize + aes.BlockSize:
-      SaltSize + aes.BlockSize + len(plaintext)]
+  // serialize and store the current version
+  versionBytes, err := versionToBytes(Version)
+  if err != nil { return nil, err }
+  copy(version, versionBytes)
 
-  // randomize the salt and the IV
+  // randomize the salt and the initialization vector
   if _, err := rand.Read(salt); err != nil { return nil, err }
   if _, err := rand.Read(iv); err != nil { return nil, err }
 
-  // hash the password into an AES-256 (32-byte) key using the generated salt
+  // hash the password into the necessary keys using the salt
   encryptionKey, hmacKey, err := hashPassword(password, salt, HashWorkFactor)
   if err != nil { return nil, err }
 
@@ -222,18 +250,15 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   stream := cipher.NewCFBEncrypter(block, iv)
   stream.XORKeyStream(ciphertext, plaintext)
 
-  // get slices of the entire content and the signature
-  content := output[:SaltSize + aes.BlockSize + len(plaintext)]
-  signature := output[len(output) - SignatureSize:]
-
-  // sign the content
+  // sign our data (everything _but_ the signature space)
+  content := blob.To("data")
   signatureData, err := sign(content, hmacKey)
   if err != nil { return nil, err }
 
-  // store the signature at the end of the content
+  // store the signature
   copy(signature, signatureData)
 
-  return output, nil
+  return blob.Bytes(), nil
 }
 
 // decrypt some data using the given password
@@ -245,23 +270,56 @@ func decrypt(data []byte, password string) ([]byte, error) {
     return nil, err
   }
 
-  // read the salt, IV, and ciphertext from the unverified data
-  salt := data[:SaltSize]
-  iv := data[SaltSize:SaltSize + aes.BlockSize]
-  ciphertext := data[SaltSize + aes.BlockSize:len(data) - SignatureSize]
+  // make a blob that conforms to our defined structure
+  blob := NewBlob(
+    "version", VersionSize,
+    "salt", SaltSize,
+    "iv", aes.BlockSize,
+
+    // the ciphertext is everything in the blob _except_ the other fields
+    "data", len(data) - (VersionSize + SaltSize + aes.BlockSize + SignatureSize),
+
+    "signature", SignatureSize,
+
+    // initalize the blob with the encrypted data
+    data,
+  )
+
+  // make sure we can decrypt this version
+  version, err := bytesToVersion(blob.Get("version"))
+  if err != nil { return nil, err }
+
+  // we'll never be able to handle newer versions!
+  if version > Version {
+    return nil, fmt.Errorf("Latest supported version is %d (got: %d)",
+        Version, version)
+  }
+
+  // decrypt using a version of the algorithm that matches the given blob
+  if version < Version {
+    // TODO: add support for older versions once they exist
+    panic("No older versions shoud exist at this time!")
+  }
+
+  // read the the parts we need from the unverified data
+  salt := blob.Get("salt")
+  iv := blob.Get("iv")
+  ciphertext := blob.Get("data")
+  signature := blob.Get("signature")
 
   // hash the password with the supplied salt to get the keys
   encryptionKey, hmacKey, err := hashPassword(password, salt, HashWorkFactor)
   if err != nil { return nil, err }
 
-  // verify the integrity of the data
-  if _, err = verify(data, hmacKey); err != nil { return nil, err }
+  // verify the integrity of the blob (including the version)
+  err = verify(blob.To("data"), signature, hmacKey)
+  if err != nil { return nil, err }
 
   // decrypt the ciphertext
   block, err := aes.NewCipher(encryptionKey)
   if err != nil { return nil, err }
 
-  // decrypt directly into the ciphertext to save creating another array
+  // decrypt directly into the original slice to save creating a new array
   plaintext := ciphertext[:]
   stream := cipher.NewCFBDecrypter(block, iv)
   stream.XORKeyStream(plaintext, ciphertext)
