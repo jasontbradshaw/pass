@@ -12,7 +12,6 @@ import (
   "encoding/binary"
   "fmt"
   "io/ioutil"
-  "math"
 
   "code.google.com/p/go.crypto/scrypt"
 )
@@ -58,23 +57,27 @@ const SaltSize = 32
 
 // the size of key to use for encryption. using 32 bytes (256 bits) selects
 // AES-256 encryption (see: http://golang.org/pkg/crypto/aes/#NewCipher).
-const KeySize = 32
+const EncryptionKeySize = 32
 
 // we want our HMAC keys to the same size as the blocksize (see:
 // http://stackoverflow.com/a/12207647 and
 // http://en.wikipedia.org/wiki/Hash-based_message_authentication_code#Definition_.28from_RFC_2104.29).
 const HMACKeySize = sha512.BlockSize
 
-// the work factor to use when hashing the master password. this number is used
-// as the exponent of a power of 2, which is used for the N parameter to the
-// scrypt algorithm. we shoot for a hash time of around 1/4 second on decent
-// hardware, to keep the amount of time spent hashing from being inconvenient
-// for users.
-const HashWorkFactor = 12
+// the parameters to use when hashing the master password. we shoot for a memory
+// requirement of 128Mb (128 * N * r bytes).
+const HashN uint32 = 1 << 16 // 2^16
+const HashR uint32 = 16
+const HashP uint32 = 2
+
+// how large in bytes each hash parameter is, in bytes
+const HashParamSize = 4
 
 // the minimum size of encrypted content, since it must include a version, the
-// password salt, an initialization vector, and a signature at a minimum.
-const minEncryptedLength = VersionSize + SaltSize + aes.BlockSize + SignatureSize
+// password salt, the hashing parameters, an initialization vector, and a
+// signature - at a minimum!
+const minEncryptedLength = (VersionSize + SaltSize + (3 * HashParamSize) +
+    aes.BlockSize + SignatureSize)
 
 // compress some data using the GZip algorithm and return it
 func compress(data []byte) ([]byte, error) {
@@ -152,7 +155,7 @@ func verify(data, suppliedSignature, key []byte) error {
 
 // encode the given version number as an array of bytes, then return the array
 // and whether there was an error.
-func versionToBytes(version uint32) ([]byte, error) {
+func uint32ToBytes(version uint32) ([]byte, error) {
   buf := new(bytes.Buffer)
   if err := binary.Write(buf, binary.BigEndian, version); err != nil {
     return nil, err
@@ -162,7 +165,7 @@ func versionToBytes(version uint32) ([]byte, error) {
 
 // read a version number from an array of bytes and return the version number
 // along with an error, if any.
-func bytesToVersion(versionBytes []byte) (uint32, error) {
+func bytesToUint32(versionBytes []byte) (uint32, error) {
   // make sure we got enough bytes to parse a version out of them
   if len(versionBytes) < VersionSize {
     return 0, fmt.Errorf(
@@ -181,30 +184,31 @@ func bytesToVersion(versionBytes []byte) (uint32, error) {
 
 // given a password string and a salt, return two byte arrays. the first should
 // be used for encryption, the second for HMAC.
-func hashPassword(password string, salt []byte, workFactor int) ([]byte, []byte, error) {
-  minWorkFactor := 1
-  maxWorkFactor := 31
-  if workFactor < minWorkFactor || workFactor > maxWorkFactor {
-    err := fmt.Errorf("Work factor must be between %d and %d (got: %d)",
-        minWorkFactor, maxWorkFactor, workFactor)
-    return nil, nil, err
+func hashPassword(password string, salt []byte, N, r, p uint32) ([]byte, []byte, error) {
+  // ensure that all the encryption paramters are larger than zero
+  if (N <= 0) {
+    return nil, nil, fmt.Errorf("N must be larger than zero")
+  } else if (r <= 0) {
+    return nil, nil, fmt.Errorf("r must be larger than zero")
+  } else if (p <= 0) {
+    return nil, nil, fmt.Errorf("p must be larger than zero")
   }
 
-  // turn the work factor into an iteration count, which must be a power of two
-  N := int(math.Pow(2, float64(workFactor)))
-  r := 32
-  p := 4
+  // NOTE: scrypt memory usage is approximately 128 * `N` * `r` bytes. since `p`
+  // has little effect on memory usage, it can be used to tune the running time
+  // of the algorithm.
 
   // generate enough bytes for both the encryption and HMAC keys. additionally,
   // since scrypt is checking the sizes of the paramter values for us, we don't
   // need to do it ourselves (see:
   // http://code.google.com/p/go/source/browse/scrypt/scrypt.go?repo=crypto).
-  hash, err := scrypt.Key([]byte(password), salt, N, r, p, KeySize + HMACKeySize)
+  hash, err := scrypt.Key([]byte(password), salt, int(N), int(r), int(p),
+      EncryptionKeySize + HMACKeySize)
   if err != nil { return nil, nil, err }
 
   // return the keys according to our convention (encryption, then hmac)
-  encryptionKey := hash[:KeySize]
-  hmacKey := hash[KeySize:]
+  encryptionKey := hash[:EncryptionKeySize]
+  hmacKey := hash[EncryptionKeySize:]
   return encryptionKey, hmacKey, nil
 }
 
@@ -216,6 +220,9 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   // make a blob that conforms to our defined structure
   blob := NewBlob(
     "version", VersionSize,
+    "N", HashParamSize,
+    "r", HashParamSize,
+    "p", HashParamSize,
     "salt", SaltSize,
     "iv", aes.BlockSize,
     "data", len(plaintext),
@@ -225,12 +232,15 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   // get the slices we'll be working with
   version := blob.Get("version")
   salt := blob.Get("salt")
+  N := blob.Get("N")
+  r := blob.Get("r")
+  p := blob.Get("p")
   iv := blob.Get("iv")
   ciphertext := blob.Get("data")
   signature := blob.Get("signature")
 
   // serialize and store the current version
-  versionBytes, err := versionToBytes(Version)
+  versionBytes, err := uint32ToBytes(Version)
   if err != nil { return nil, err }
   copy(version, versionBytes)
 
@@ -238,8 +248,22 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   if _, err := rand.Read(salt); err != nil { return nil, err }
   if _, err := rand.Read(iv); err != nil { return nil, err }
 
+  // serialize and store the hash paramters
+  nBytes, err := uint32ToBytes(HashN)
+  if err != nil { return nil, err }
+  copy(N, nBytes)
+
+  rBytes, err := uint32ToBytes(HashR)
+  if err != nil { return nil, err }
+  copy(r, rBytes)
+
+  pBytes, err := uint32ToBytes(HashP)
+  if err != nil { return nil, err }
+  copy(p, pBytes)
+
   // hash the password into the necessary keys using the salt
-  encryptionKey, hmacKey, err := hashPassword(password, salt, HashWorkFactor)
+  encryptionKey, hmacKey, err := hashPassword(password, salt,
+      HashN, HashR, HashP)
   if err != nil { return nil, err }
 
   // encrypt the plaintext
@@ -274,10 +298,18 @@ func decrypt(data []byte, password string) ([]byte, error) {
   blob := NewBlob(
     "version", VersionSize,
     "salt", SaltSize,
+    "N", HashParamSize,
+    "r", HashParamSize,
+    "p", HashParamSize,
     "iv", aes.BlockSize,
 
     // the ciphertext is everything in the blob _except_ the other fields
-    "data", len(data) - (VersionSize + SaltSize + aes.BlockSize + SignatureSize),
+    "data", len(data) - (
+      VersionSize +
+      SaltSize +
+      (3 * HashParamSize) +
+      aes.BlockSize +
+      SignatureSize),
 
     "signature", SignatureSize,
 
@@ -286,7 +318,7 @@ func decrypt(data []byte, password string) ([]byte, error) {
   )
 
   // make sure we can decrypt this version
-  version, err := bytesToVersion(blob.Get("version"))
+  version, err := bytesToUint32(blob.Get("version"))
   if err != nil { return nil, err }
 
   // we'll never be able to handle newer versions!
@@ -307,8 +339,16 @@ func decrypt(data []byte, password string) ([]byte, error) {
   ciphertext := blob.Get("data")
   signature := blob.Get("signature")
 
-  // hash the password with the supplied salt to get the keys
-  encryptionKey, hmacKey, err := hashPassword(password, salt, HashWorkFactor)
+  // read the hash paramters we need to hash the password
+  N, err := bytesToUint32(blob.Get("N"))
+  if err != nil { return nil, err }
+  r, err := bytesToUint32(blob.Get("r"))
+  if err != nil { return nil, err }
+  p, err := bytesToUint32(blob.Get("p"))
+  if err != nil { return nil, err }
+
+  // hash the password with the supplied salt and paramters to get the keys
+  encryptionKey, hmacKey, err := hashPassword(password, salt, N, r, p)
   if err != nil { return nil, err }
 
   // verify the integrity of the blob (including the version)

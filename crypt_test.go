@@ -255,74 +255,82 @@ func TestFuzzSignAndVerify(t *testing.T) {
 func TestHashPasswordSize(t *testing.T) {
   salt := make([]byte, SaltSize)
   for _, data := range AllData {
-    encryptionKey, hmacKey, err := hashPassword(string(data), salt, 5)
+    encryptionKey, hmacKey, err := hashPassword(string(data), salt, 16, 2, 1)
     assert.NoError(t, err)
 
-    assert.Equal(t, KeySize, len(encryptionKey))
+    assert.Equal(t, EncryptionKeySize, len(encryptionKey))
     assert.Equal(t, HMACKeySize, len(hmacKey))
   }
 }
 
-// test that the iterations parameter can't be negative
-func TestHashPasswordNegativeWorkFactor(t *testing.T) {
+// shouldn't accept an N value that's not a power of two
+func TestHashPasswordNonPowerOfTwoN(t *testing.T) {
   salt := make([]byte, SaltSize)
-  _, _, err := hashPassword("test", salt, -1)
-  assert.Error(t, err)
+  for _, data := range AllData {
+    _, _, err := hashPassword(string(data), salt, 15, 2, 1)
+    assert.Error(t, err)
+  }
 }
 
-// test that the iterations parameter can't be zero
-func TestHashPasswordZeroWorkFactor(t *testing.T) {
+// shouldn't accept an N value that's zero
+func TestHashPasswordZeroN(t *testing.T) {
   salt := make([]byte, SaltSize)
-  _, _, err := hashPassword("test", salt, 0)
-  assert.Error(t, err)
+  for _, data := range AllData {
+    _, _, err := hashPassword(string(data), salt, 0, 2, 1)
+    assert.Error(t, err)
+  }
 }
 
-// test that the iterations parameter can be 1
-func TestHashPasswordOneWorkFactor(t *testing.T) {
+// shouldn't accept an `r` value that's zero
+func TestHashPasswordZeroR(t *testing.T) {
   salt := make([]byte, SaltSize)
-  _, _, err := hashPassword("test", salt, 1)
-  assert.NoError(t, err)
+  for _, data := range AllData {
+    _, _, err := hashPassword(string(data), salt, 16, 0, 1)
+    assert.Error(t, err)
+  }
 }
 
-// test that the iterations parameter can't be larger than 31
-func TestHashPasswordTooLargeWorkFactor(t *testing.T) {
+// shouldn't accept an `p` value that's zero
+func TestHashPasswordZeroP(t *testing.T) {
   salt := make([]byte, SaltSize)
-  _, _, err := hashPassword("test", salt, 32)
-  assert.Error(t, err)
+  for _, data := range AllData {
+    _, _, err := hashPassword(string(data), salt, 16, 2, 0)
+    assert.Error(t, err)
+  }
 }
 
 // getting version bytes should work
-func TestVersionToBytesZero(t *testing.T) {
-  bytes, err := versionToBytes(0)
+func TestUint32ToBytesZero(t *testing.T) {
+  bytes, err := uint32ToBytes(0)
   assert.NoError(t, err)
   assert.Equal(t, bytes, make([]byte, VersionSize))
 }
 
 // getting version bytes should return the result in big-endian mode
-func TestVersionToBytesBigEndian(t *testing.T) {
-  bytes, err := versionToBytes(1)
+func TestUint32ToBytesBigEndian(t *testing.T) {
+  bytes, err := uint32ToBytes(1)
   assert.NoError(t, err)
   assert.Equal(t, bytes, []byte{0, 0, 0, 1})
 }
 
 // parsing a too-short byte array should fail
-func TestBytesToVersionShort(t *testing.T) {
+func TestBytesToUint32(t *testing.T) {
   for i := 0; i < 4; i++ {
-    _, err := bytesToVersion(make([]byte, i))
+    _, err := bytesToUint32(make([]byte, i))
     assert.Error(t, err)
   }
 }
 
 // parsing version bytes should work
-func TestBytesToVersionZero(t *testing.T) {
-  version, err := bytesToVersion([]byte{0, 0, 0, 0})
+func TestBytesToUint32Zero(t *testing.T) {
+  version, err := bytesToUint32([]byte{0, 0, 0, 0})
   assert.NoError(t, err)
   assert.Equal(t, version, 0)
 }
 
 // parsing version bytes should interperet the result in big-endian mode
-func TestBytesToVersionBigEndian(t *testing.T) {
-  version, err := bytesToVersion([]byte{0, 0, 0, 1})
+func TestBytesToUint32BigEndian(t *testing.T) {
+  version, err := bytesToUint32([]byte{0, 0, 0, 1})
   assert.NoError(t, err)
   assert.Equal(t, version, 1)
 }
@@ -354,7 +362,7 @@ func BenchmarkHashPassword(b *testing.B) {
     deoptimizer, _, _ = hashPassword(
         hashPasswordBenchmarkPassword,
         hashPasswordBenchmarkSalt,
-        HashWorkFactor)
+        HashN, HashR, HashP)
   }
 }
 
