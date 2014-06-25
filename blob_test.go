@@ -502,3 +502,38 @@ func TestBlobSliceModify(t *testing.T) {
   slice[0] = 7
   assert.Equal(t, b.Get("baz")[0], byte(7))
 }
+
+// make sure we can get the data out of a blob that we put in
+func TestBlobCreateAndInit(t *testing.T) {
+  b := NewBlob(
+    "foo", 1,
+    "bar", 2,
+    "baz", 3,
+  )
+
+  // set some random data in the bytes
+  b.Get("foo")[0] = 1
+
+  b.Get("bar")[0] = 2
+  b.Get("bar")[1] = 2
+
+  b.Get("baz")[0] = 3
+  b.Get("baz")[1] = 3
+  b.Get("baz")[2] = 3
+
+  // get the bytes for this blob
+  bBytes := b.Bytes()
+
+  // re-create the blob from the original's bytes
+  newB := NewBlob(
+    "foo", 1,
+    "bar", 2,
+    "baz", 3,
+    bBytes,
+  )
+
+  // make sure all the fields match exactly
+  assert.Equal(t, b.Get("foo"), newB.Get("foo"))
+  assert.Equal(t, b.Get("bar"), newB.Get("bar"))
+  assert.Equal(t, b.Get("baz"), newB.Get("baz"))
+}
