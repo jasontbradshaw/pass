@@ -344,7 +344,10 @@ func TestEncryptOutputLength(t *testing.T) {
     encrypted, err := encrypt(plaintext, "password")
     assert.NoError(t, err)
 
-    assert.Equal(t, len(encrypted), minEncryptedLength + len(plaintext))
+    // we can never have less data than this, but since we compress the given
+    // plaintext, we may have less data than the length of the original
+    // plaintext!
+    assert.True(t, len(encrypted) >= minEncryptedLength)
   }
 }
 

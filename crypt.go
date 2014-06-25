@@ -217,6 +217,10 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
   // NOTE: no plaintext padding is needed since we're using CFB mode (see:
   // http://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Padding).
 
+  // first, compress the plaintext to obfuscate its contents
+  compressedPlaintext, err := compress(plaintext);
+  if err != nil { return nil, err }
+
   // make a blob that conforms to our defined structure
   blob := NewBlob(
     "version", VersionSize,
@@ -225,7 +229,7 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
     "p", HashParamSize,
     "salt", SaltSize,
     "iv", aes.BlockSize,
-    "data", len(plaintext),
+    "data", len(compressedPlaintext),
     "signature", SignatureSize,
   )
 
@@ -266,13 +270,13 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
       HashN, HashR, HashP)
   if err != nil { return nil, err }
 
-  // encrypt the plaintext
+  // encrypt the compressed plaintext
   block, err := aes.NewCipher(encryptionKey)
   if err != nil { return nil, err }
 
   // use CFB mode to encrypt the data, so we don't have to pad
   stream := cipher.NewCFBEncrypter(block, iv)
-  stream.XORKeyStream(ciphertext, plaintext)
+  stream.XORKeyStream(ciphertext, compressedPlaintext)
 
   // sign our data (everything _but_ the signature space)
   content := blob.To("data")
@@ -360,9 +364,13 @@ func decrypt(data []byte, password string) ([]byte, error) {
   if err != nil { return nil, err }
 
   // decrypt directly into the original slice to save creating a new array
-  plaintext := ciphertext[:]
+  compressedPlaintext := ciphertext[:]
   stream := cipher.NewCFBDecrypter(block, iv)
-  stream.XORKeyStream(plaintext, ciphertext)
+  stream.XORKeyStream(compressedPlaintext, ciphertext)
+
+  // decompress the compressed plaintext
+  plaintext, err := decompress(compressedPlaintext)
+  if err != nil { return nil, err }
 
   return plaintext, nil
 }
