@@ -47,11 +47,11 @@ func NewBlob(params ...interface{}) Blob {
 
       lastWasString = true
     case int:
-      // make sure field sizes are at least 0
+      // make sure field sizes are at least 1
       if !lastWasString {
         panic("Parameter list must have the pattern (string, int)...")
-      } else if t < 0 {
-        panic(fmt.Sprintf("Field sizes must be >= 0 (got: %d)", t))
+      } else if t < 1 {
+        panic(fmt.Sprintf("Field sizes must be >= 1 (got: %d)", t))
       }
       lastWasString = false
     case []byte:

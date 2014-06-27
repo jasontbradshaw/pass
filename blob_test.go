@@ -46,40 +46,10 @@ func TestNewBlobWrongInitSize(t *testing.T) {
   })
 }
 
-// can create a blob with a single empty field
+// can't create a blob with an empty field
 func TestNewBlobEmptyField(t *testing.T) {
-  assert.NotPanics(t, func() {
+  assert.Panics(t, func() {
     NewBlob("foo", 0)
-  })
-}
-
-// can create and init a blob with a single empty field
-func TestNewBlobEmptyFieldInit(t *testing.T) {
-  assert.NotPanics(t, func() {
-    NewBlob("foo", 0, make([]byte, 0))
-  })
-}
-
-// can create a blob with many empty fields
-func TestNewBlobEmptyFields(t *testing.T) {
-  assert.NotPanics(t, func() {
-    NewBlob(
-      "foo", 0,
-      "bar", 0,
-      "baz", 0,
-    )
-  })
-}
-
-// can create and init a blob with many empty fields
-func TestNewBlobEmptyFieldsInit (t *testing.T) {
-  assert.NotPanics(t, func() {
-    NewBlob(
-      "foo", 0,
-      "bar", 0,
-      "baz", 0,
-      make([]byte, 0),
-    )
   })
 }
 
@@ -138,7 +108,7 @@ func TestNewBlobDuplicateField(t *testing.T) {
 
 // can't access a non-existent field
 func TestBlobGetNoSuchField(t *testing.T) {
-  b := NewBlob("foo", 0)
+  b := NewBlob("foo", 1)
   assert.Panics(t, func() {
     b.Get("bar")
   })
@@ -146,7 +116,7 @@ func TestBlobGetNoSuchField(t *testing.T) {
 
 // can access an existing field
 func TestBlobGet(t *testing.T) {
-  b := NewBlob("foo", 0)
+  b := NewBlob("foo", 1)
   assert.NotPanics(t, func() {
     b.Get("foo")
   })
@@ -166,30 +136,10 @@ func TestBlobGetModify(t *testing.T) {
   assert.Equal(t, b.Get("foo")[0], byte(5))
 }
 
-// length of a blob with an empty field should be zero
-func TestBlobEmptyFieldLen(t *testing.T) {
-  b := NewBlob("foo", 0)
-  assert.Equal(t, b.Len(), 0)
-}
-
-// length of a blob with many empty fields should be zero
-func TestBlobEmptyFieldsLen(t *testing.T) {
-  b := NewBlob(
-    "foo", 0,
-    "bar", 0,
-    "baz", 0,
-  )
-  assert.Equal(t, b.Len(), 0)
-}
-
-// length of a blob with empty and non-empty fields should be correct
-func TestBlobMixedEmptyFieldsLen(t *testing.T) {
-  b := NewBlob(
-    "foo", 1,
-    "bar", 0,
-    "baz", 2,
-  )
-  assert.Equal(t, b.Len(), 3)
+// length of a blob with a single field should be correct
+func TestBlobSingleFieldLen(t *testing.T) {
+  b := NewBlob("foo", 1)
+  assert.Equal(t, b.Len(), 1)
 }
 
 // length of a blob with many fields should be correct
@@ -221,51 +171,12 @@ func TestBlobManyFieldsGetLen(t *testing.T) {
   assert.Equal(t, len(b.Get("baz")), 3)
 }
 
-// the length of an empty field should be zero
-func TestBlobGetEmptyFieldLen(t *testing.T) {
-  b := NewBlob(
-    "foo", 0,
-  )
-  assert.Equal(t, len(b.Get("foo")), 0)
-}
-
-// the length of a normal field should be its specified length
+// the length of a field should be its specified length
 func TestBlobGetNormalFieldLen(t *testing.T) {
   b := NewBlob(
     "foo", 3,
   )
   assert.Equal(t, len(b.Get("foo")), 3)
-}
-
-// the length of an empty field mixed in with some normal fields should be zero,
-// and the normal fields should be their specified lengths.
-func TestBlobGetMixedFieldsLen(t *testing.T) {
-  b := NewBlob(
-    "foo", 0,
-    "bar", 1,
-    "baz", 2,
-  )
-  assert.Equal(t, len(b.Get("foo")), 0)
-  assert.Equal(t, len(b.Get("bar")), 1)
-  assert.Equal(t, len(b.Get("baz")), 2)
-
-  b = NewBlob(
-    "bar", 1,
-    "foo", 0,
-    "baz", 2,
-  )
-  assert.Equal(t, len(b.Get("bar")), 1)
-  assert.Equal(t, len(b.Get("foo")), 0)
-  assert.Equal(t, len(b.Get("baz")), 2)
-
-  b = NewBlob(
-    "bar", 1,
-    "baz", 2,
-    "foo", 0,
-  )
-  assert.Equal(t, len(b.Get("bar")), 1)
-  assert.Equal(t, len(b.Get("baz")), 2)
-  assert.Equal(t, len(b.Get("foo")), 0)
 }
 
 // a blob's bytes should start off empty
@@ -336,40 +247,6 @@ func TestBlobBytesModify(t *testing.T) {
   bytes[2] = 7
 
   assert.Equal(t, b.Get("bar")[1], byte(7))
-}
-
-// the length of an empty blob's bytes should match the length of the blob
-func TestBlobEmptyBytesLen(t *testing.T) {
-  b := NewBlob(
-    "foo", 0,
-  )
-
-  assert.Equal(t, b.Len(), len(b.Bytes()))
-}
-
-// the length of the bytes of a blob with mixed fields should match the length
-// of the blob.
-func TestBlobMixedFieldsBytesLen(t *testing.T) {
-  b := NewBlob(
-    "foo", 0,
-    "bar", 1,
-    "baz", 2,
-  )
-  assert.Equal(t, b.Len(), len(b.Bytes()))
-
-  b = NewBlob(
-    "bar", 1,
-    "foo", 0,
-    "baz", 2,
-  )
-  assert.Equal(t, b.Len(), len(b.Bytes()))
-
-  b = NewBlob(
-    "bar", 1,
-    "baz", 2,
-    "foo", 0,
-  )
-  assert.Equal(t, b.Len(), len(b.Bytes()))
 }
 
 // slicing a blob with the From method should work
