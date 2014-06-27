@@ -46,7 +46,7 @@ import (
 const Version uint32 = 0
 
 // how large in bytes our version number is, in bytes. a uint32 should ALWAYS be
-// 4 bytes, so we can just hard-code this here.
+// 4 bytes, so we just hard-code this here.
 const VersionSize = 4
 
 // the size of the signature appended to signed data
@@ -185,9 +185,9 @@ func bytesToUint32(versionBytes []byte) (uint32, error) {
 // given a password string and a salt, return two byte arrays. the first should
 // be used for encryption, the second for HMAC.
 func hashPassword(password string, salt []byte, N, r, p uint32) ([]byte, []byte, error) {
-  // ensure that all the encryption paramters are larger than zero
-  if (N <= 0) {
-    return nil, nil, fmt.Errorf("N must be larger than zero")
+  // ensure that all the encryption paramters meet minimum requirements
+  if (N <= 1) {
+    return nil, nil, fmt.Errorf("N must be larger than one")
   } else if (r <= 0) {
     return nil, nil, fmt.Errorf("r must be larger than zero")
   } else if (p <= 0) {
@@ -212,8 +212,16 @@ func hashPassword(password string, salt []byte, N, r, p uint32) ([]byte, []byte,
   return encryptionKey, hmacKey, nil
 }
 
-// encrypt some data using the given password and return the result
+// encrypt some data using the given password and default scrypt params, then
+// return the result.
 func Encrypt(plaintext []byte, password string) ([]byte, error) {
+  // use the default params to encrypt this text
+  return EncryptWithHashParams(plaintext, password, HashN, HashR, HashP)
+}
+
+// encrypt some data using the given password and scrypt params, then return the
+// result.
+func EncryptWithHashParams(plaintext []byte, password string, N, r, p uint32) ([]byte, error) {
   // NOTE: no plaintext padding is needed since we're using CFB mode (see:
   // http://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Padding).
 
@@ -236,9 +244,9 @@ func Encrypt(plaintext []byte, password string) ([]byte, error) {
   // get the slices we'll be working with
   version := blob.Get("version")
   salt := blob.Get("salt")
-  N := blob.Get("N")
-  r := blob.Get("r")
-  p := blob.Get("p")
+  BlobN := blob.Get("N")
+  BlobR := blob.Get("r")
+  BlobP := blob.Get("p")
   iv := blob.Get("iv")
   ciphertext := blob.Get("data")
   signature := blob.Get("signature")
@@ -253,21 +261,20 @@ func Encrypt(plaintext []byte, password string) ([]byte, error) {
   if _, err := rand.Read(iv); err != nil { return nil, err }
 
   // serialize and store the hash paramters
-  nBytes, err := uint32ToBytes(HashN)
+  nBytes, err := uint32ToBytes(N)
   if err != nil { return nil, err }
-  copy(N, nBytes)
+  copy(BlobN, nBytes)
 
-  rBytes, err := uint32ToBytes(HashR)
+  rBytes, err := uint32ToBytes(r)
   if err != nil { return nil, err }
-  copy(r, rBytes)
+  copy(BlobR, rBytes)
 
-  pBytes, err := uint32ToBytes(HashP)
+  pBytes, err := uint32ToBytes(p)
   if err != nil { return nil, err }
-  copy(p, pBytes)
+  copy(BlobP, pBytes)
 
   // hash the password into the necessary keys using the salt
-  encryptionKey, hmacKey, err := hashPassword(password, salt,
-      HashN, HashR, HashP)
+  encryptionKey, hmacKey, err := hashPassword(password, salt, N, r, p)
   if err != nil { return nil, err }
 
   // encrypt the compressed plaintext

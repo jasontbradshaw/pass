@@ -281,6 +281,15 @@ func TestHashPasswordZeroN(t *testing.T) {
   }
 }
 
+// shouldn't accept an N value that's one
+func TestHashPasswordOneN(t *testing.T) {
+  salt := make([]byte, SaltSize)
+  for _, data := range AllData {
+    _, _, err := hashPassword(string(data), salt, 1, 2, 1)
+    assert.Error(t, err)
+  }
+}
+
 // shouldn't accept an `r` value that's zero
 func TestHashPasswordZeroR(t *testing.T) {
   salt := make([]byte, SaltSize)
@@ -413,6 +422,29 @@ func TestEncryptAndDecrypt(t *testing.T) {
     assert.NoError(t, err)
 
     assert.Equal(t, plaintext, decrypted)
+  }
+}
+
+// make sure we get the original data back after we encrypt and decrypt it
+func TestEncryptWithHashParamsAndDecrypt(t *testing.T) {
+  password := "password"
+  for _, plaintext := range AllData {
+    encrypted, err := EncryptWithHashParams(plaintext, password, 2, 7, 3)
+    assert.NoError(t, err)
+
+    decrypted, err := Decrypt(encrypted, password)
+    assert.NoError(t, err)
+
+    assert.Equal(t, plaintext, decrypted)
+  }
+}
+
+// encrypting with a non-power-of-two N param should fail
+func TestEncryptWithHashParamsNonPowerOfTwoN(t *testing.T) {
+  password := "password"
+  for _, plaintext := range AllData {
+    _, err := EncryptWithHashParams(plaintext, password, 100, 2, 1)
+    assert.Error(t, err)
   }
 }
 
