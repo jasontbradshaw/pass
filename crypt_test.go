@@ -335,13 +335,25 @@ func TestBytesToUint32BigEndian(t *testing.T) {
   assert.Equal(t, version, 1)
 }
 
+// converting a uint32 to bytes and back should always produce the same result
+func TestUint32ToBytesAndBytesToUint32(t *testing.T) {
+  var i uint32;
+  for i = 0; i < 1024; i++ {
+    iBytes, err := uint32ToBytes(i)
+    assert.NoError(t, err)
+
+    newI, err := bytesToUint32(iBytes)
+    assert.NoError(t, err)
+
+    assert.Equal(t, i, newI)
+  }
+}
+
 // make sure encryption output is large enough to include all the needed data at
 // a minimum.
-func TestEncryptOutputLength(t *testing.T) {
-  skipIfShort(t)
-
+func TestEncryptHasMinimumOutputLength(t *testing.T) {
   for _, plaintext := range AllData {
-    encrypted, err := encrypt(plaintext, "password")
+    encrypted, err := Encrypt(plaintext, "password")
     assert.NoError(t, err)
 
     // we can never have less data than this, but since we compress the given
@@ -351,6 +363,64 @@ func TestEncryptOutputLength(t *testing.T) {
   }
 }
 
+// make sure that encrypting the data is doing some sort of compression. we
+// supply it with a large amount of repetitious data, which any self-respecting
+// compression algorithm should reduce the size of with ease. the size of the
+// data should me much longer than the minimum encrypted length, in order to
+// ensure that the encryption overhead is balanced out.
+func TestEncryptIsCompressing(t *testing.T) {
+  // lots of zeros should compress very well!
+  repetitiousData := make([]byte, minEncryptedLength * 10)
+
+  encrypted, err := Encrypt(repetitiousData, "password")
+  assert.NoError(t, err)
+
+  // in this case, the encrypted data should be smaller
+  assert.True(t, len(encrypted) < minEncryptedLength + len(repetitiousData))
+}
+
+// encrypting with an empty password should be allowed
+func TestEncryptEmptyPassword(t *testing.T) {
+  for _, plaintext := range AllData {
+    _, err := Encrypt(plaintext, "")
+    assert.NoError(t, err)
+  }
+}
+
+// encrypting the same data two different times should always produce a
+// different blob, since the initialization vector and salt should be random.
+func TestEncryptSameDataIsDifferent(t *testing.T) {
+  password := "password"
+  for _, plaintext := range AllData {
+    encrypted1, err := Encrypt(plaintext, password)
+    assert.NoError(t, err)
+
+    encrypted2, err := Encrypt(plaintext, password)
+    assert.NoError(t, err)
+
+    assert.NotEqual(t, encrypted1, encrypted2)
+  }
+}
+
+// make sure we get the original data back after we encrypt and decrypt it
+func TestEncryptAndDecrypt(t *testing.T) {
+  password := "password"
+  for _, plaintext := range AllData {
+    encrypted, err := Encrypt(plaintext, password)
+    assert.NoError(t, err)
+
+    decrypted, err := Decrypt(encrypted, password)
+    assert.NoError(t, err)
+
+    assert.Equal(t, plaintext, decrypted)
+  }
+}
+
+// fuzz test encrypting and decrypting with lots of random data
+func TestFuzzEncryptAndDecrypt(t *testing.T) {
+  skipIfShort(t)
+}
+
 // BENCHMARKS
 //
 // NOTE: these tests all store a result globally to prevent the compiler from
@@ -358,9 +428,11 @@ func TestEncryptOutputLength(t *testing.T) {
 // used.
 
 // benchmark password hashing using the defaults used internally
-var hashPasswordBenchmarkPassword = string(randomBytes[32:64])
-var hashPasswordBenchmarkSalt = randomBytes[:SaltSize]
 func BenchmarkHashPassword(b *testing.B) {
+  hashPasswordBenchmarkPassword := string(randomBytes[32:64])
+  hashPasswordBenchmarkSalt := randomBytes[:SaltSize]
+
+  b.ResetTimer()
   for i := 0; i < b.N; i++ {
     deoptimizer, _, _ = hashPassword(
         hashPasswordBenchmarkPassword,
@@ -375,8 +447,10 @@ func BenchmarkCompress(b *testing.B) {
   }
 }
 
-var decompressBenchmarkData, _ = compress(randomBytes)
 func BenchmarkDecompress(b *testing.B) {
+  decompressBenchmarkData, _ := compress(randomBytes)
+
+  b.ResetTimer()
   for i := 0; i < b.N; i++ {
     deoptimizer, _ = decompress(decompressBenchmarkData)
   }
@@ -388,8 +462,10 @@ func BenchmarkSign(b *testing.B) {
   }
 }
 
-var benchmarkDataSignature, _ = sign(randomBytes, hmacKeyData)
 func BenchmarkVerify(b *testing.B) {
+  benchmarkDataSignature, _ := sign(randomBytes, hmacKeyData)
+
+  b.ResetTimer()
   for i := 0; i < b.N; i++ {
     deoptimizer = verify(randomBytes, benchmarkDataSignature, hmacKeyData)
   }

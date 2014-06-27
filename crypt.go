@@ -213,11 +213,11 @@ func hashPassword(password string, salt []byte, N, r, p uint32) ([]byte, []byte,
 }
 
 // encrypt some data using the given password and return the result
-func encrypt(plaintext []byte, password string) ([]byte, error) {
+func Encrypt(plaintext []byte, password string) ([]byte, error) {
   // NOTE: no plaintext padding is needed since we're using CFB mode (see:
   // http://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Padding).
 
-  // first, compress the plaintext to obfuscate its contents
+  // first, compress the plaintext to obfuscate its contents and reduce its size
   compressedPlaintext, err := compress(plaintext);
   if err != nil { return nil, err }
 
@@ -290,7 +290,7 @@ func encrypt(plaintext []byte, password string) ([]byte, error) {
 }
 
 // decrypt some data using the given password
-func decrypt(data []byte, password string) ([]byte, error) {
+func Decrypt(data []byte, password string) ([]byte, error) {
   // make sure our data is of at least the minimum length
   if len(data) < minEncryptedLength {
     err := fmt.Errorf("Data is too short to be valid (min length: %d)",
@@ -301,10 +301,10 @@ func decrypt(data []byte, password string) ([]byte, error) {
   // make a blob that conforms to our defined structure
   blob := NewBlob(
     "version", VersionSize,
-    "salt", SaltSize,
     "N", HashParamSize,
     "r", HashParamSize,
     "p", HashParamSize,
+    "salt", SaltSize,
     "iv", aes.BlockSize,
 
     // the ciphertext is everything in the blob _except_ the other fields
