@@ -470,3 +470,18 @@ func BenchmarkVerify(b *testing.B) {
     deoptimizer = verify(randomBytes, benchmarkDataSignature, hmacKeyData)
   }
 }
+
+func BenchmarkEncrypt(b *testing.B) {
+  for i := 0; i < b.N; i++ {
+    deoptimizer, _ = Encrypt(randomBytes, "password")
+  }
+}
+
+func BenchmarkDecrypt(b *testing.B) {
+  encryptedData, _ := Encrypt(randomBytes, "password")
+
+  b.ResetTimer()
+  for i := 0; i < b.N; i++ {
+    deoptimizer, _ = Decrypt(encryptedData, "password")
+  }
+}
