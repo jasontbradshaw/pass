@@ -2,7 +2,6 @@ package pass
 
 import (
   "crypto/rand"
-  "math/big"
   "testing"
 
   "github.com/stretchr/testify/assert"
@@ -77,31 +76,6 @@ func TestDecompressInvalid(t *testing.T) {
 // data once again.
 func TestCompressAndDecompress(t *testing.T) {
   for _, data := range AllData {
-    compressed, err := compress(data)
-    assert.NoError(t, err)
-
-    decompressed, err := decompress(compressed)
-    assert.NoError(t, err)
-
-    assert.Equal(t, decompressed, data)
-  }
-}
-
-// fuzz test compression with lots of random data
-func TestFuzzCompressAndDecompress(t *testing.T) {
-  skipIfShort(t)
-
-  for i := 0; i < 100000; i++ {
-    // create a randomly-sized array, possibly larger than a byte in length
-    size, err := rand.Int(rand.Reader, big.NewInt(512))
-    assert.NoError(t, err)
-
-    // fill the array with random data
-    data := make([]byte, size.Int64())
-    _, err = rand.Read(data)
-    assert.NoError(t, err)
-
-    // compress, decompress, and compare to the original
     compressed, err := compress(data)
     assert.NoError(t, err)
 
@@ -224,33 +198,6 @@ func TestSignAndVerify(t *testing.T) {
   }
 }
 
-// test signing and verifying lots of random data with random keys
-func TestFuzzSignAndVerify(t *testing.T) {
-  skipIfShort(t)
-
-  for i := 0; i < 100000; i++ {
-    // create a randomly-sized data array
-    size, err := rand.Int(rand.Reader, big.NewInt(512))
-    assert.NoError(t, err)
-
-    // fill the array and key with random data
-    data := make([]byte, size.Int64())
-    _, err = rand.Read(data)
-    assert.NoError(t, err)
-
-    key := make([]byte, HMACKeySize)
-    _, err = rand.Read(key)
-    assert.NoError(t, err)
-
-    // sign, verify, and compare to the original
-    signature, err := sign(data, key)
-    assert.NoError(t, err)
-
-    err = verify(data, signature, key)
-    assert.NoError(t, err)
-  }
-}
-
 // hashed passwords should always output hashes of the determined key sizes
 func TestHashPasswordSize(t *testing.T) {
   salt := make([]byte, SaltSize)
@@ -360,9 +307,9 @@ func TestUint32ToBytesAndBytesToUint32(t *testing.T) {
 
 // make sure encryption output is large enough to include all the needed data at
 // a minimum.
-func TestEncryptHasMinimumOutputLength(t *testing.T) {
+func TestEncryptWithHashParamsHasMinimumOutputLength(t *testing.T) {
   for _, plaintext := range AllData {
-    encrypted, err := Encrypt(plaintext, "password")
+    encrypted, err := EncryptWithHashParams(plaintext, "password", 8, 2, 1)
     assert.NoError(t, err)
 
     // we can never have less data than this, but since we compress the given
@@ -376,12 +323,12 @@ func TestEncryptHasMinimumOutputLength(t *testing.T) {
 // supply it with a large amount of repetitious data, which any self-respecting
 // compression algorithm should reduce the size of with ease. the size of the
 // data should me much longer than the minimum encrypted length, in order to
-// ensure that the encryption overhead is balanced out.
-func TestEncryptIsCompressing(t *testing.T) {
+// ensure that the compression and encryption overhead is balanced out.
+func TestEncryptWithHashParamsIsCompressing(t *testing.T) {
   // lots of zeros should compress very well!
   repetitiousData := make([]byte, minEncryptedLength * 10)
 
-  encrypted, err := Encrypt(repetitiousData, "password")
+  encrypted, err := EncryptWithHashParams(repetitiousData, "password", 8, 2, 1)
   assert.NoError(t, err)
 
   // in this case, the encrypted data should be smaller
@@ -389,39 +336,25 @@ func TestEncryptIsCompressing(t *testing.T) {
 }
 
 // encrypting with an empty password should be allowed
-func TestEncryptEmptyPassword(t *testing.T) {
+func TestEncryptWithHashParamsEmptyPassword(t *testing.T) {
   for _, plaintext := range AllData {
-    _, err := Encrypt(plaintext, "")
+    _, err := EncryptWithHashParams(plaintext, "", 8, 2, 1)
     assert.NoError(t, err)
   }
 }
 
 // encrypting the same data two different times should always produce a
 // different blob, since the initialization vector and salt should be random.
-func TestEncryptSameDataIsDifferent(t *testing.T) {
+func TestEncryptWithHashParamsSameDataIsDifferent(t *testing.T) {
   password := "password"
   for _, plaintext := range AllData {
-    encrypted1, err := Encrypt(plaintext, password)
+    encrypted1, err := EncryptWithHashParams(plaintext, password, 8, 2, 1)
     assert.NoError(t, err)
 
-    encrypted2, err := Encrypt(plaintext, password)
+    encrypted2, err := EncryptWithHashParams(plaintext, password, 8, 2, 1)
     assert.NoError(t, err)
 
     assert.NotEqual(t, encrypted1, encrypted2)
-  }
-}
-
-// make sure we get the original data back after we encrypt and decrypt it
-func TestEncryptAndDecrypt(t *testing.T) {
-  password := "password"
-  for _, plaintext := range AllData {
-    encrypted, err := Encrypt(plaintext, password)
-    assert.NoError(t, err)
-
-    decrypted, err := Decrypt(encrypted, password)
-    assert.NoError(t, err)
-
-    assert.Equal(t, plaintext, decrypted)
   }
 }
 
@@ -448,9 +381,14 @@ func TestEncryptWithHashParamsNonPowerOfTwoN(t *testing.T) {
   }
 }
 
-// fuzz test encrypting and decrypting with lots of random data
-func TestFuzzEncryptAndDecrypt(t *testing.T) {
-  skipIfShort(t)
+// make sure that we're using a good amount of memory when hashing. this helps
+// mitigate attacks by making a brute-force take lots of memory, not just CPU
+// time.
+func TestDefaultHashParametersUseEnoughMemory(t *testing.T) {
+  // TODO: re-evaluate this assumption periodically!
+  enoughMemoryBytes := 1024 * 1024 * 128
+
+  assert.Equal(t, int(128 * HashN * HashR), enoughMemoryBytes)
 }
 
 // BENCHMARKS
