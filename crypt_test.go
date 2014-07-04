@@ -382,6 +382,71 @@ func TestEncryptWithHashParamsNonPowerOfTwoN(t *testing.T) {
   }
 }
 
+// attempting to decrypt an empty blob should fail
+func TestDecryptEmptyDataFails(t *testing.T) {
+  _, err := Decrypt(make([]byte, 0), "password")
+  assert.Error(t, err)
+}
+
+// attempting to decrypt an empty blob with an empty password should fail
+func TestDecryptEmptyDataEmptyPasswordFails(t *testing.T) {
+  _, err := Decrypt(make([]byte, 0), "")
+  assert.Error(t, err)
+}
+
+// attempting to decrypt a blob with an empty password (when the original
+// password wasn't empty) should fail.
+func TestDecryptEmptyPasswordFails(t *testing.T) {
+  password := "password"
+  for _, plaintext := range AllData {
+    encrypted, err := EncryptWithHashParams(plaintext, password, 2, 2, 1)
+    assert.NoError(t, err)
+
+    _, err = Decrypt(encrypted, "")
+    assert.Error(t, err)
+  }
+}
+
+// attempting to decrypt a blob with the wrong password should fail
+func TestDecryptWrongPasswordFails(t *testing.T) {
+  password := "password"
+  for _, plaintext := range AllData {
+    encrypted, err := EncryptWithHashParams(plaintext, password, 2, 2, 1)
+    assert.NoError(t, err)
+
+    _, err = Decrypt(encrypted, "incorrect")
+    assert.Error(t, err)
+  }
+}
+
+// attempting to decrypt a blob that has had bytes modified should fail
+func TestDecryptModifiedBlobFails(t *testing.T) {
+  password := "password"
+  for _, plaintext := range AllData {
+    encrypted, err := EncryptWithHashParams(plaintext, password, 2, 2, 1)
+    assert.NoError(t, err)
+
+    // change a single byte to throw off the checksum
+    encrypted[0]++
+
+    _, err = Decrypt(encrypted, password)
+    assert.Error(t, err)
+  }
+}
+
+// decrypting a blob protected with an empty password should work
+func TestDecryptEmptyPassword(t *testing.T) {
+  password := ""
+  for _, plaintext := range AllData {
+    encrypted, err := EncryptWithHashParams(plaintext, password, 2, 2, 1)
+    assert.NoError(t, err)
+
+    decrypted, err := Decrypt(encrypted, password)
+    assert.NoError(t, err)
+    assert.Equal(t, plaintext, decrypted)
+  }
+}
+
 // make sure that we're using a good amount of memory when hashing. this helps
 // mitigate attacks by making a brute-force take lots of memory, not just CPU
 // time.
