@@ -3,6 +3,7 @@ package pass
 import (
   "crypto/rand"
   "testing"
+  "time"
 
   "github.com/stretchr/testify/assert"
 )
@@ -385,10 +386,13 @@ func TestEncryptWithHashParamsNonPowerOfTwoN(t *testing.T) {
 // mitigate attacks by making a brute-force take lots of memory, not just CPU
 // time.
 func TestDefaultHashParametersUseEnoughMemory(t *testing.T) {
-  // TODO: re-evaluate this assumption periodically!
   enoughMemoryBytes := 1024 * 1024 * 128
-
   assert.Equal(t, int(128 * HashN * HashR), enoughMemoryBytes)
+
+  // force periodic re-evaluation of these assumptions
+  msg := "Ensure that the assumptions made about scrypt paramters still hold!"
+  reevaluateDate := time.Date(2015, time.January, 1, 23, 0, 0, 0, time.UTC)
+  assert.True(t, time.Now().Before(reevaluateDate), msg)
 }
 
 // BENCHMARKS
