@@ -244,9 +244,9 @@ func EncryptWithHashParams(plaintext []byte, password string, N, r, p uint32) ([
   // get the slices we'll be working with
   version := blob.Get("version")
   salt := blob.Get("salt")
-  BlobN := blob.Get("N")
-  BlobR := blob.Get("r")
-  BlobP := blob.Get("p")
+  blobN := blob.Get("N")
+  blobR := blob.Get("r")
+  blobP := blob.Get("p")
   iv := blob.Get("iv")
   ciphertext := blob.Get("data")
   signature := blob.Get("signature")
@@ -263,15 +263,15 @@ func EncryptWithHashParams(plaintext []byte, password string, N, r, p uint32) ([
   // serialize and store the hash paramters
   nBytes, err := uint32ToBytes(N)
   if err != nil { return nil, err }
-  copy(BlobN, nBytes)
+  copy(blobN, nBytes)
 
   rBytes, err := uint32ToBytes(r)
   if err != nil { return nil, err }
-  copy(BlobR, rBytes)
+  copy(blobR, rBytes)
 
   pBytes, err := uint32ToBytes(p)
   if err != nil { return nil, err }
-  copy(BlobP, pBytes)
+  copy(blobP, pBytes)
 
   // hash the password into the necessary keys using the salt
   encryptionKey, hmacKey, err := hashPassword(password, salt, N, r, p)
