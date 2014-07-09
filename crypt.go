@@ -16,32 +16,6 @@ import (
   "code.google.com/p/go.crypto/scrypt"
 )
 
-// IMPLEMENTATION NOTES:
-// - BUILD LOTS OF TESTS, especially around database loading/saving/durability
-// - encrypt PII separately from the main database
-// - decrypt once to get all non-PII with encrypted PII, then decrypt each
-//   individual PII (passwords, custom fields, etc.) as needed. this should
-//   prevent more than one PII from existing in memory at a time.
-// - use simpler internal encryption so decryption of in-memory stuff is fast
-// - use a "tags" format instead of folders (array of strings).
-// - user fields are at same level as internal fields
-// - internal fields can't be deleted (for simplicity's sake, allow this?)
-// - allow easy integration with autotype-like tools via user scripts (plugins)
-// - use a sub-command style command line API
-// - allow the user to do _everything_ through the command line
-// - include an HTTPS-only interface that uses the same mechanism as command
-//   line API. this will decrease the maintenance burden by making the HTTP
-//   interface a consumer of said API, and increase dogfooding of the same.
-// - include a password generator that's independent of entry creation
-// - allow several password customization options (see
-//   http://passwordsgenerator.net), arbitrary lengths, and the ability to
-//   generate several passwords at once.
-// - include history for all modifications
-
-// TODO:
-// - store scrypt paramters with the encrypted blob for future-proofing
-// - make scrypt use at least 128Mb of memory by default, lots of CPU
-
 // the current version of the encrypted format as a byte array
 const Version uint32 = 0
 
