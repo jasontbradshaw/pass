@@ -33,7 +33,7 @@ const SaltSize = 32
 // AES-256 encryption (see: http://golang.org/pkg/crypto/aes/#NewCipher).
 const EncryptionKeySize = 32
 
-// we want our HMAC keys to the same size as the blocksize (see:
+// we want our HMAC keys to be the same size as the blocksize (see:
 // http://stackoverflow.com/a/12207647 and
 // http://en.wikipedia.org/wiki/Hash-based_message_authentication_code#Definition_.28from_RFC_2104.29).
 const HMACKeySize = sha512.BlockSize
@@ -44,10 +44,10 @@ const HashN uint32 = 1 << 16 // 2^16
 const HashR uint32 = 16
 const HashP uint32 = 2
 
-// how large in bytes each hash parameter is, in bytes
+// how large each hash parameter is, in bytes
 const HashParamSize = 4
 
-// the minimum size of encrypted content, since it must include a version, the
+// the minimum size of encrypted content. it must include a version, the
 // password salt, the hashing parameters, an initialization vector, and a
 // signature - at a minimum!
 const minEncryptedLength = (VersionSize + SaltSize + (3 * HashParamSize) +
