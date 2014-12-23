@@ -19,8 +19,8 @@ import (
 // the current version of the encrypted format as a byte array
 const Version uint32 = 0
 
-// how large in bytes our version number is, in bytes. a uint32 should ALWAYS be
-// 4 bytes, so we just hard-code this here.
+// how large our version number is, in bytes. a uint32 should ALWAYS be 4 bytes,
+// so we just hard-code this here.
 const VersionSize = 4
 
 // the size of the signature appended to signed data
