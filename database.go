@@ -1,7 +1,6 @@
 package pass
 
-import (
-)
+import ()
 
 // IMPLEMENTATION NOTES:
 // - encrypt PII separately from the main database
