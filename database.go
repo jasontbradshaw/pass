@@ -9,8 +9,6 @@ import ()
 //   prevent more than one PII from existing in memory at a time.
 // - use simpler internal encryption so decryption of in-memory stuff is fast
 // - use a "tags" format instead of folders (array of strings).
-// - user fields are at same level as internal fields
-// - internal fields can't be deleted (for simplicity's sake, allow this?)
 // - allow easy integration with autotype-like tools via user scripts (plugins)
 // - use a sub-command style command line API
 // - allow the user to do _everything_ through the command line
@@ -28,8 +26,8 @@ import ()
 /*
 {
   "settings": {
-    "clipboard_clear_delay": 10000,
-    "database_lock_delay": 30000
+    "clipboard_clear_delay_ms": 10000,
+    "database_lock_delay_ms": 30000
   },
 
   // these are encrypted with a password generated from the master password,
@@ -37,7 +35,7 @@ import ()
   // lets us store it in memory when the user enters their password for the
   // first time, then decrypt things only as-needed to prevent them from getting
   // written to the swap area if memory swaps. the encryption/decryption of
-  // these blobs should be pretty much instantaneous. each entry is keyed by a
+  // these blobs should be pretty much instantaneous. each entry is keyed by its
   // UUID, which will allow us to easily access the data for a specific entry
   // without having to do a linear search to find a specific one.
   "entries": {
@@ -56,10 +54,10 @@ import ()
   // a UUID for this entry
   "id": "00000000-0000-0000-0000-000000000000",
 
-  // unix timestamps for each value
-  "create_date": 1234567890,
-  "update_date": 1234567890,
-  "delete_date": 1234567890,
+  // ISO-8601 timestamps for each value
+  "created_at": "2014-12-20T14:42:30Z",
+  "updated_at": "2014-12-20T14:42:30Z",
+  "deleted_at": nil,
 
   // standard data
   "title": "Hacker News",
@@ -67,17 +65,18 @@ import ()
   "username": "pg",
   "password": "sjf3489yrhlOFasdfklj44445",
 
-  // the unix timestamp after which this entry is considered "expired"
-  "expiry_date": 1234567890,
+  // the ISO-8601 timestamp after which this entry is considered "expired"
+  "expires_at": "2014-12-20T14:42:30Z",
 
-  // an arbitrary map of string key/value pairs the user can create and manage
-  "data": {
+  // an array of GMail-like string tags, in sorted order, de-duplicated
+  "tags": []
 
-  },
+  // a map of arbitrary string key/value pairs the user can create and manage
+  "data": {},
 
   // a wholesale copy of the previous version of the entry, made every time a
   // modification is saved.
-  "previous_version": { }
+  "previous_version": {}
 }
 */
 
