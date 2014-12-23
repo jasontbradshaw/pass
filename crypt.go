@@ -16,14 +16,38 @@ import (
 	"code.google.com/p/go.crypto/scrypt"
 )
 
-// the current version of the encrypted format as a byte array
+// the top-level format of the encrypted blob:
+//
+//   ----
+//   magic number (4 bytes, always 0xEA8F73F5)
+//   version number as a uint32 (4 bytes)
+//   ----
+//   metadata size as a uint32 (4 bytes)
+//   medadata (same as the given size above)
+//   ----
+//   payload (the remaining bytes)
+//   ---
+//
+// the version number specifies how the program interprets the metadata and the
+// payload. this gives maximum flexibility against future changes.
+
+// the size of our magic number, in bytes
+const MagicNumberSize = 4
+
+// the magic number that marks all of our encrypted blobs as belonging to us
+const MagicNumber uint32 = 0xEA8F73F5
+
+// the current version of the encrypted blob format, and the one all new blobs
+// will be created with.
 const Version uint32 = 0
 
-// how large our version number is, in bytes. a uint32 should ALWAYS be 4 bytes,
-// so we just hard-code this here.
+// the size of our version number, in bytes
 const VersionSize = 4
 
-// the size of the signature appended to signed data
+// how large the size of the metadata header size block is, in bytes
+const MetaDataSizeSize = 4
+
+// the size of the signature added to signed data
 const SignatureSize = sha512.Size
 
 // the size of the random salt in bytes we use during password hashing
@@ -194,6 +218,67 @@ func hashPassword(password string, salt []byte, N, r, p uint32) ([]byte, []byte,
 	encryptionKey := hash[:EncryptionKeySize]
 	hmacKey := hash[EncryptionKeySize:]
 	return encryptionKey, hmacKey, nil
+}
+
+// given a blob, confirms it's of the required format, then returns its
+// constituent parts: the version, the metadata, and the payload. returns an
+// error if something went wrong.
+func loadBlob(blobBytes []byte) (uint32, []byte, []byte, error) {
+	// if the blob is too short to be valid, give up
+	const minSize = MagicNumberSize + VersionSize + MetaDataSizeSize
+	if (len(blobBytes) < minSize) {
+		return 0, nil, nil, fmt.Errorf(
+			"Blob is too short to be valid (minimum size: %d bytes)", minSize);
+	}
+
+	// load as much information as we can
+	blob := NewBlob(
+		"magic_number", MagicNumberSize,
+		"version", VersionSize,
+		"meta_size", MetaDataSizeSize,
+		blobBytes,
+	)
+
+	// validate the magic number to perform a sanity check on our data
+	magicNumber, err := bytesToUint32(blob.Get("magic_number"))
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	if (magicNumber != MagicNumber) {
+		return 0, nil, nil, fmt.Errorf(
+			"Unrecognized file format: magic number did not match")
+	}
+
+	// parse the version number
+	version, err := bytesToUint32(blob.Get("version"))
+	if err != nil {
+		return 0, nil, nil, err
+	}
+
+	// parse the metadata size
+	metaSize, err := bytesToUint32(blob.Get("meta_size"))
+	if err != nil {
+		return 0, nil, nil, err
+	}
+
+	// the bytes from the start of the metadata body onwards
+	restBytes := blobBytes[minSize:]
+
+	// if the remaining data isn't large enough to cover the given size, return an
+	// error.
+	if (metaSize > uint32(len(restBytes))) {
+		return 0, nil, nil, fmt.Errorf(
+			"Got invalid metadata size: %d (remaining data only %d bytes)",
+			metaSize,
+			len(restBytes),
+		)
+	}
+
+	// retrieve the metadata and the payload
+	metaBytes := restBytes[0:metaSize]
+	payloadBytes := restBytes[metaSize:]
+
+	return version, metaBytes, payloadBytes, nil
 }
 
 // encrypt some data using the given password and default scrypt params, then
