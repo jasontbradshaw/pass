@@ -65,7 +65,7 @@ func NewBlob(params ...interface{}) Blob {
 		}
 	}
 
-	// build the internal boundaries map from the given paramters
+	// build the internal boundaries map from the given parameters
 	fieldName := ""
 	boundaryStart := 0
 	var initBytes []byte = nil
