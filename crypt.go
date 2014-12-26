@@ -23,13 +23,15 @@ import (
 //   version number as a uint32 (4 bytes)
 //   ----
 //   metadata size as a uint32 (4 bytes)
-//   medadata (same as the given size above)
+//   medadata (of the given size above)
 //   ----
 //   payload (the remaining bytes)
 //   ---
 //
-// the version number specifies how the program interprets the metadata and the
-// payload. this gives maximum flexibility against future changes.
+// the version number specifies how the program interprets the metadata, and the
+// metadata determines how the program interprets the payload. this gives
+// maximum flexibility in the face of future changes and backwards
+// compatability.
 
 // the size of our magic number, in bytes
 const MagicNumberSize = 4
@@ -118,9 +120,9 @@ func sign(data, key []byte) ([]byte, error) {
 	// the same size as the block size, so there's really no benefit in using a
 	// key size that's not equal to the block size of the hash algorithm. it
 	// doesn't hurt, however, so we let that case alone.
-	if len(key) < HMACKeySize {
+	if len(key) < sha512.BlockSize {
 		err := fmt.Errorf("Key size is too small (should be %d bytes)",
-			HMACKeySize)
+			sha512.BlockSize)
 		return nil, err
 	}
 
@@ -134,9 +136,9 @@ func sign(data, key []byte) ([]byte, error) {
 // return whether the given signature verifies the given data
 func verify(data, suppliedSignature, key []byte) error {
 	// make sure the signature is the correct size
-	if len(suppliedSignature) != SignatureSize {
+	if len(suppliedSignature) != sha512.Size {
 		err := fmt.Errorf("Signature must be %d bytes long (got %d)",
-			SignatureSize, len(suppliedSignature))
+			sha512.Size, len(suppliedSignature))
 		return err
 	}
 
@@ -150,7 +152,7 @@ func verify(data, suppliedSignature, key []byte) error {
 	// notice that we securely compare the signatures to avoid timing attacks!
 	if !hmac.Equal(suppliedSignature, computedSignature) {
 		err := fmt.Errorf(
-			"Signatures do not match:\n  supplied: %v\n  computed: %v)",
+			"Signatures do not match:\n  supplied: %v\n  computed: %v",
 			suppliedSignature, computedSignature)
 		return err
 	}
@@ -159,33 +161,34 @@ func verify(data, suppliedSignature, key []byte) error {
 	return nil
 }
 
-// encode the given version number as an array of bytes, then return the array
-// and whether there was an error.
-func uint32ToBytes(version uint32) ([]byte, error) {
+// encode the given number as an array of bytes, then return the array and
+// whether there was an error.
+func uint32ToBytes(number uint32) ([]byte, error) {
 	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.BigEndian, version); err != nil {
+	if err := binary.Write(buf, binary.BigEndian, number); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
 }
 
-// read a version number from an array of bytes and return the version number
-// along with an error, if any.
-func bytesToUint32(versionBytes []byte) (uint32, error) {
+// read a number from an array of bytes and return the number, or an error if
+// something went wrong.
+func bytesToUint32(numberBytes []byte) (uint32, error) {
 	// make sure we got enough bytes to parse a version out of them
-	if len(versionBytes) < VersionSize {
+	uint32Bytes := 4
+	if len(numberBytes) < uint32Bytes {
 		return 0, fmt.Errorf(
-			"Not enough bytes to contain a version (minimum: %d)", VersionSize)
+			"Not enough bytes to contain a number (minimum: %d)", uint32Bytes)
 	}
 
-	// read the version from our bytes and return it
-	buf := bytes.NewBuffer(versionBytes)
-	var version uint32
-	if err := binary.Read(buf, binary.BigEndian, &version); err != nil {
+	// read the number from the bytes and return it
+	buf := bytes.NewBuffer(numberBytes)
+	var number uint32
+	if err := binary.Read(buf, binary.BigEndian, &number); err != nil {
 		return 0, err
 	}
 
-	return version, nil
+	return number, nil
 }
 
 // given a password string and a salt, return two byte arrays. the first should
@@ -222,7 +225,7 @@ func hashPassword(password string, salt []byte, N, r, p uint32) ([]byte, []byte,
 
 // given a blob, confirms it's of the required format, then returns its
 // constituent parts: the version, the metadata, and the payload. returns an
-// error if something went wrong.
+// error if something goes wrong.
 func loadBlob(blobBytes []byte) (uint32, []byte, []byte, error) {
 	// if the blob is too short to be valid, give up
 	const minSize = MagicNumberSize + VersionSize + MetaDataSizeSize
@@ -231,7 +234,7 @@ func loadBlob(blobBytes []byte) (uint32, []byte, []byte, error) {
 			"Blob is too short to be valid (minimum size: %d bytes)", minSize);
 	}
 
-	// load as much information as we can
+	// load as much information as we can at this point
 	blob := NewBlob(
 		"magic_number", MagicNumberSize,
 		"version", VersionSize,
@@ -268,14 +271,14 @@ func loadBlob(blobBytes []byte) (uint32, []byte, []byte, error) {
 	// error.
 	if (metaSize > uint32(len(restBytes))) {
 		return 0, nil, nil, fmt.Errorf(
-			"Got invalid metadata size: %d (remaining data only %d bytes)",
+			"Got invalid metadata size: %d bytes (remaining data only %d bytes)",
 			metaSize,
 			len(restBytes),
 		)
 	}
 
 	// retrieve the metadata and the payload
-	metaBytes := restBytes[0:metaSize]
+	metaBytes := restBytes[:metaSize]
 	payloadBytes := restBytes[metaSize:]
 
 	return version, metaBytes, payloadBytes, nil
