@@ -4,91 +4,63 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"fmt"
+	"crypto/sha512"
 
 	"github.com/ugorji/go/codec"
 )
 
-// the struct used to compute the signature for all the data
-type cryptSignature0 struct {
-	N scryptN
-	R scryptR
-	P scryptP
-	Salt salt32
-	IV aesIV
+// the struct used to store the metadata for the ciphertext payload
+type cryptData0 struct {
+	Version    version
+	ScryptN    scryptN
+	ScryptR    scryptR
+	ScryptP    scryptP
+	Salt       salt32
+	IV         aesIV
 	Ciphertext []byte
 }
 
-// the struct used to store the metadata for the ciphertext payload
-type cryptMeta0 struct {
-	N scryptN
-	R scryptR
-	P scryptP
-	Salt salt32
-	IV aesIV
-	Signature sha512Signature
-}
-
-func encrypt0(plaintext []byte, password string) (meta, payload, error) {
+func encrypt0(plaintext []byte, password string) ([]byte, error) {
 	var (
 		// these get populated later
-		salt salt32
-		iv aesIV
+		salt          salt32
+		iv            aesIV
 		encryptionKey aes256Key
-		hmacKey sha512Key
-		signature sha512Signature
+		hmacKey       sha512Key
+		signature     sha512Signature
 
 		N scryptN = 1 << 16
 		r scryptR = 16
 		p scryptP = 2
 	)
 
-	// generate securely-random salt and initialization vectors
+	// generate securely-random salt and initialization vector bytes
 	if _, err := rand.Read(salt[:]); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if _, err := rand.Read(iv[:]); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// compress the plaintext to obfuscate its contents and reduce its size.
 	// compression maximizes the entropy prior to encryption, ensuring that we're
-	// encrypting the most random-looking thing possible (see:
-	// http://superuser.com/a/257802).
+	// encrypting the most random-looking thing possible and hardening against
+	// known-plaintext attacks (see: http://superuser.com/a/257802).
 	compressedPlaintext, err := compressGzip(plaintext)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	// hash the password into enough bytes to get an AES-256 key and HMAC key
-	hashBytes, err := hashPasswordScrypt(password, salt, N, r, p,
-		len(encryptionKey) + len(hmacKey))
+	// hash the password into an AES-256 key and HMAC key
+	err = hashPasswordScrypt(password, salt, N, r, p, encryptionKey[:], hmacKey[:])
 	if err != nil {
-		return nil, nil, err
-	}
-
-	// copy the parts into their respective arrays, ensuring we copied the correct
-	// number of bytes for each.
-	en := copy(encryptionKey[:], hashBytes[:len(encryptionKey)])
-	if en != len(encryptionKey) {
-		return nil, nil, fmt.Errorf(
-			"Incorrect number of encryption key bytes copied (got: %d, expected: %d)",
-			en, len(encryptionKey),
-		)
-	}
-
-	hn := copy(hmacKey[:], hashBytes[len(encryptionKey):])
-	if hn != len(hmacKey) {
-		return nil, nil, fmt.Errorf(
-			"Incorrect number of HMAC key bytes copied (got: %d, expected: %d)",
-			hn, len(hmacKey),
-		)
+		return nil, err
 	}
 
 	// encrypt the compressed plaintext
 	block, err := aes.NewCipher(encryptionKey[:])
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// uses CFB mode to encrypt the data, so we don't have to pad the input (see:
@@ -97,58 +69,57 @@ func encrypt0(plaintext []byte, password string) (meta, payload, error) {
 	stream := cipher.NewCFBEncrypter(block, iv[:])
 	stream.XORKeyStream(ciphertext, compressedPlaintext)
 
-	// create the struct we'll use to compute the signature
-	sig := cryptSignature0 {
+	// the struct used to serialize the data to msgpack
+	meta := cryptData0{
+		0,
 		N, r, p,
 		salt,
 		iv,
 		ciphertext,
 	}
 
-	// serialize the signature struct, then sign the serialized bytes
-	var (
-		sigBytes []byte
-		mh codec.MsgpackHandle
-	)
-	enc := codec.NewEncoderBytes(&sigBytes, &mh)
-	err = enc.Encode(sig)
+	// serialize the struct to bytes
+	metaBytes, err := encodeMsgpack(&meta)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	signature, err = signSHA512(sigBytes, hmacKey)
+	// append a msgpack bin 8 object header to the stream, sans any body data.
+	// this will identify the signature and its body bytes once we append the
+	// signature itself. we hash this along with the other data so we can get a
+	// HMAC hash of the complete content (sans the signature), but still adhere to
+	// the msgpack spec and be able to decode it normally later. see:
+	// https://github.com/msgpack/msgpack/blob/master/spec.md#bin-format-family
+	// for spec details.
+	metaWithSigHeaderBytes := append(metaBytes, 0xc4, uint8(len(signature)))
+
+	// sign everything, including the newly-added header
+	signature, err = signSHA512(metaWithSigHeaderBytes, hmacKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	// build the metadata struct with the signature we just computed
-	var metaBytes []byte
-	meta := cryptMeta0 {
-		N, r, p,
-		salt,
-		iv,
-		signature,
-	}
+	// append the calculated signature to the newly-signed bytes
+	metaWithSigBytes := append(metaWithSigHeaderBytes, signature[:]...)
 
-	// serialize the metadata struct
-	enc = codec.NewEncoderBytes(&metaBytes, &mh)
-	err = enc.Encode(meta)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// return the signed metadata and encrypted payload
-	return metaBytes, ciphertext, nil
+	return metaWithSigBytes, nil
 }
 
-func decrypt0(metaBytes meta, ciphertext []byte, password string) ([]byte, error) {
-	// decode the given metadata
+func decrypt0(signedMeta []byte, password string) ([]byte, error) {
+	// decode the metadata object
 	var (
-		meta = cryptMeta0{}
-		mh codec.MsgpackHandle
+		meta cryptData0
+		mh   codec.MsgpackHandle
 	)
-	dec := codec.NewDecoderBytes(metaBytes, &mh)
+	dec := codec.NewDecoderBytes(signedMeta, &mh)
 	err := dec.Decode(&meta)
+	if err != nil {
+		return nil, err
+	}
+
+	// decode the signature, the next object in the input bytes
+	var signature sha512Signature
+	err = dec.Decode(&signature)
 	if err != nil {
 		return nil, err
 	}
@@ -156,49 +127,17 @@ func decrypt0(metaBytes meta, ciphertext []byte, password string) ([]byte, error
 	// hash the password into an AES-256 key and HMAC key
 	var (
 		encryptionKey aes256Key
-		hmacKey sha512Key
+		hmacKey       sha512Key
 	)
-	hashBytes, err := hashPasswordScrypt(password, meta.Salt, meta.N, meta.R,
-		meta.P, len(encryptionKey) + len(hmacKey))
+	err = hashPasswordScrypt(password, meta.Salt,
+		meta.ScryptN, meta.ScryptR, meta.ScryptP, encryptionKey[:], hmacKey[:])
 	if err != nil {
 		return nil, err
 	}
 
-	// copy the parts into their respective arrays, ensuring we copied the correct
-	// number of bytes for each.
-	en := copy(encryptionKey[:], hashBytes[:len(encryptionKey)])
-	if en != len(encryptionKey) {
-		return nil, fmt.Errorf(
-			"Incorrect number of encryption key bytes copied (got: %d, expected: %d)",
-			en, len(encryptionKey),
-		)
-	}
-
-	hn := copy(hmacKey[:], hashBytes[len(encryptionKey):])
-	if hn != len(hmacKey) {
-		return nil, fmt.Errorf(
-			"Incorrect number of HMAC key bytes copied (got: %d, expected: %d)",
-			hn, len(hmacKey),
-		)
-	}
-
-	// sign the received data and make sure the signature verifies
-	sig := cryptSignature0 {
-		meta.N, meta.R, meta.P,
-		meta.Salt,
-		meta.IV,
-		ciphertext,
-	}
-
-	// serialize the signature struct, then ensure the signature verifies it
-	var sigBytes []byte
-	enc := codec.NewEncoderBytes(&sigBytes, &mh)
-	err = enc.Encode(sig)
-	if err != nil {
-		return nil, err
-	}
-
-	err = verifySHA512(sigBytes, meta.Signature, hmacKey)
+	// verify the signed data, the meta plus the signature header bytes
+	sigStartIndex := len(signedMeta) - sha512.Size
+	err = verifySHA512(signedMeta[:sigStartIndex], signature, hmacKey)
 	if err != nil {
 		return nil, err
 	}
@@ -209,9 +148,9 @@ func decrypt0(metaBytes meta, ciphertext []byte, password string) ([]byte, error
 		return nil, err
 	}
 
-	compressedPlaintext := make([]byte, len(ciphertext))
+	compressedPlaintext := make([]byte, len(meta.Ciphertext))
 	stream := cipher.NewCFBDecrypter(block, meta.IV[:])
-	stream.XORKeyStream(compressedPlaintext, ciphertext)
+	stream.XORKeyStream(compressedPlaintext, meta.Ciphertext)
 
 	// decompress and return the plaintext
 	plaintext, err := decompressGzip(compressedPlaintext)
