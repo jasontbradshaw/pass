@@ -25,22 +25,6 @@ type cryptVersionDatabase struct {
 	versionsById map[cryptVersionNumber]*cryptVersionRecord
 }
 
-// get a copy of the latest available crypt version's record
-func (c *cryptVersionDatabase) LatestVersion() cryptVersionRecord {
-	return c.versions[len(c.versions)-1]
-}
-
-// get a copy of the given version's record, returning "not ok" if a record with
-// the given version number couldn't be found.
-func (c *cryptVersionDatabase) FindVersion(requestedVersion cryptVersionNumber) (cryptVersionRecord, bool) {
-	record, ok := c.versionsById[requestedVersion]
-	if !ok {
-		return cryptVersionRecord{}, false
-	}
-
-	return *record, true
-}
-
 // given a bunch of versions, builds the internal version list and populates the
 // lookup map.
 func newCryptVersionDatabase(records ...cryptVersionRecord) cryptVersionDatabase {
@@ -68,6 +52,29 @@ func newCryptVersionDatabase(records ...cryptVersionRecord) cryptVersionDatabase
 		versions,
 		versionsById,
 	}
+}
+
+// returns a copy of all the internal version records
+func (c *cryptVersionDatabase) Versions() []cryptVersionRecord {
+	records := make([]cryptVersionRecord, len(c.versions))
+	copy(records, c.versions)
+	return records
+}
+
+// get a copy of the latest available crypt version's record
+func (c *cryptVersionDatabase) LatestVersion() cryptVersionRecord {
+	return c.versions[len(c.versions)-1]
+}
+
+// get a copy of the given version's record, returning "not ok" if a record with
+// the given version number couldn't be found.
+func (c *cryptVersionDatabase) FindVersion(requestedVersion cryptVersionNumber) (cryptVersionRecord, bool) {
+	record, ok := c.versionsById[requestedVersion]
+	if !ok {
+		return cryptVersionRecord{}, false
+	}
+
+	return *record, true
 }
 
 // expose the canonical list of available versions, as defined by their
