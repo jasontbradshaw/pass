@@ -137,7 +137,7 @@ func hashPasswordScrypt(password string, salt salt32, N scryptN, r scryptR, p sc
 	// has little effect on memory usage, it can be used to tune the running time
 	// of the algorithm.
 
-	// ensure that all the encryption paramters meet minimum requirements
+	// ensure that all the encryption parameters meet minimum requirements
 	if N <= 1 {
 		return fmt.Errorf("N must be larger than one")
 	} else if r <= 0 {
@@ -165,20 +165,12 @@ func hashPasswordScrypt(password string, salt salt32, N scryptN, r scryptR, p sc
 	for i, b := range outputs {
 		count := len(b)
 
-		// make sure we have enough bytes left to copy
-		if offset+count > len(hashed)-1 {
-			return fmt.Errorf("Too few hashed bytes were generated to fill all output byte slices")
-		}
-
-		n := copy(b, hashed[offset:count])
+		n := copy(b, hashed[offset:offset+count])
 		if n != count {
 			return fmt.Errorf(
-				"Failed to copy enough bytes to fill output byte slice at index %d",
-				i,
-			)
+				"Failed to copy enough bytes to fill output byte slice at index %d", i)
 		}
 
-		// increase the offset
 		offset += count
 	}
 
@@ -219,14 +211,11 @@ func Decrypt(data []byte, password string) ([]byte, error) {
 
 	// decrypt based on the indicated version
 	switch version {
-	default:
-		// disallow all unrecognized versions
-		return nil, fmt.Errorf("Unable to read file of version %d", version)
-
 	// NOTE: add new versions as we create them!
 	case 0:
 		return decrypt0(data, password)
 	}
 
-	panic("This should be impossible!")
+	// disallow all unrecognized versions
+	return nil, fmt.Errorf("Unable to read file of version %d", version)
 }
