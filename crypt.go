@@ -14,16 +14,9 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-// the current version of the encrypted blob format, and the one all new blobs
-// will be created with.
-const CurrentVersion version = 0
-
 // alias types to prevent mixing up the otherwise-unlabeled simple types used
 // all over the place.
 type version int32
-type meta []byte
-type payload []byte
-
 type aes256Key [32]byte
 type aesIV [aes.BlockSize]byte
 type salt32 [32]byte
@@ -32,6 +25,10 @@ type scryptP int32
 type scryptR int32
 type sha512Key [sha512.BlockSize]byte
 type sha512Signature [sha512.Size]byte
+
+// the current version of the encrypted blob format, and the one all new blobs
+// will be created with.
+const CurrentVersion version = 0
 
 // encode something using msgpack and return the encoded bytes.
 // NOTE: pass the thing to be encoded in as a pointer!
