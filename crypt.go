@@ -110,7 +110,7 @@ func signSHA512(data []byte, key sha512Key) (sha512Signature, error) {
 }
 
 // return an erro if the given signature doesn't verify the given data
-func verifySHA512(data []byte, suppliedSignature sha512Signature, key sha512Key) error {
+func verifySHA512(data []byte, key sha512Key, suppliedSignature sha512Signature) error {
 	// sign the data ourselves
 	computedSignature, err := signSHA512(data, key)
 	if err != nil {

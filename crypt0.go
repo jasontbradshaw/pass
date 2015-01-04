@@ -137,7 +137,7 @@ func decrypt0(signedMeta []byte, password string) ([]byte, error) {
 
 	// verify the signed data, the meta plus the signature header bytes
 	sigStartIndex := len(signedMeta) - sha512.Size
-	err = verifySHA512(signedMeta[:sigStartIndex], signature, hmacKey)
+	err = verifySHA512(signedMeta[:sigStartIndex], hmacKey, signature)
 	if err != nil {
 		return nil, err
 	}
