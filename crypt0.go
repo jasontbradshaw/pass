@@ -9,9 +9,14 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
+// expose our record so it can be added to the version database
+var cryptVersionRecord0 cryptVersionRecord = cryptVersionRecord{
+	0, encrypt0, decrypt0,
+}
+
 // the struct used to store the metadata for the ciphertext payload
 type cryptData0 struct {
-	Version    version
+	Version    cryptVersionNumber
 	ScryptN    scryptN
 	ScryptR    scryptR
 	ScryptP    scryptP
