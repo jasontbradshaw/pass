@@ -36,7 +36,6 @@ type sha512Signature [sha512.Size]byte
 // encode something using msgpack and return the encoded bytes.
 // NOTE: pass the thing to be encoded in as a pointer!
 func encodeMsgpack(thing interface{}) ([]byte, error) {
-	// serialize the struct to bytes
 	var (
 		out []byte
 		mh  codec.MsgpackHandle
