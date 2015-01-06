@@ -25,6 +25,10 @@ import ()
 // the database looks like this:
 /*
 {
+  // the current version of the database format, as an integer. this is
+  // incremented every time the format changes, so that migrations may be done.
+  "version": 0,
+
   "settings": {
     "clipboard_clear_delay_ms": 10000,
     "database_lock_delay_ms": 30000
