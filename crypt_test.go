@@ -2,8 +2,8 @@ package pass
 
 import (
 	"crypto/rand"
+	"regexp"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -30,8 +30,12 @@ var deoptimizer interface{}
 var randomBytes = make([]byte, 512)
 var _, _ = rand.Read(randomBytes)
 
-// we do a lot of signing tests and need a key of a specific length for them
-var hmacKeyData []byte = randomBytes[:HMACKeySize]
+// fill some arbitrary bits with random data
+var hmacKey sha512Key = sha512Key{}
+var _ int = copy(hmacKey[:], randomBytes)
+
+var salt salt32 = salt32{}
+var _ int = copy(salt[:], randomBytes)
 
 // skip the given test if running in short mode
 func skipIfShort(t *testing.T) {
@@ -42,17 +46,17 @@ func skipIfShort(t *testing.T) {
 
 // should be able to decompress the compressed empty array
 func TestDecompressMinCompressed(t *testing.T) {
-	minCompressed, err := compress([]byte{})
+	compressed, err := compressGzip(EmptyData)
 	assert.NoError(t, err)
 
-	decompressed, err := decompress(minCompressed)
+	decompressed, err := decompressGzip(compressed)
 	assert.NoError(t, err)
 
 	assert.Equal(t, decompressed, EmptyData)
 }
 
 func TestDecompressTooShort(t *testing.T) {
-	minCompressed, err := compress([]byte{})
+	minCompressed, err := compressGzip([]byte{})
 	assert.NoError(t, err)
 
 	minCompressedLength := len(minCompressed)
@@ -60,7 +64,7 @@ func TestDecompressTooShort(t *testing.T) {
 	// check all possible sizes below the minimum compressed length to ensure that
 	// they error.
 	for size := len(minCompressed) - 1; size >= 0; size-- {
-		_, err := decompress(make([]byte, minCompressedLength))
+		_, err := decompressGzip(make([]byte, minCompressedLength))
 		assert.Error(t, err)
 	}
 }
@@ -70,7 +74,7 @@ func TestDecompressInvalid(t *testing.T) {
 	// null data is certainly invalid
 	data := make([]byte, 50)
 
-	_, err := decompress(data)
+	_, err := decompressGzip(data)
 	assert.Error(t, err)
 }
 
@@ -79,63 +83,13 @@ func TestDecompressInvalid(t *testing.T) {
 // data once again.
 func TestCompressAndDecompress(t *testing.T) {
 	for _, data := range AllData {
-		compressed, err := compress(data)
+		compressed, err := compressGzip(data)
 		assert.NoError(t, err)
 
-		decompressed, err := decompress(compressed)
+		decompressed, err := decompressGzip(compressed)
 		assert.NoError(t, err)
 
 		assert.Equal(t, decompressed, data)
-	}
-}
-
-// make sure that trying to sign with a key that's too short produces errors
-func TestGetSignatureShortKey(t *testing.T) {
-	for keySize := 0; keySize < HMACKeySize-1; keySize++ {
-		key := make([]byte, keySize)
-		_, err := sign(LongData, key)
-		assert.Error(t, err)
-	}
-}
-
-// trying to sign with a key that's long enough should produce no errors
-func TestGetSignatureMinLengthKey(t *testing.T) {
-	key := make([]byte, HMACKeySize)
-	_, err := sign(LongData, key)
-	assert.NoError(t, err)
-}
-
-// make sure that trying to sign with a key that's longer than the minimum
-// produces no errors.
-func TestGetSignatureLongKey(t *testing.T) {
-	for keySize := HMACKeySize; keySize < HMACKeySize*2; keySize++ {
-		key := make([]byte, keySize)
-		_, err := sign(LongData, key)
-		assert.NoError(t, err)
-	}
-}
-
-// make sure that signing a block of bytes always produces a signature of the
-// correct length.
-func TestGetSignatureSize(t *testing.T) {
-	for _, data := range AllData {
-		signature, err := sign(data, hmacKeyData)
-		assert.NoError(t, err)
-
-		assert.Equal(t, len(signature), SignatureSize)
-	}
-}
-
-// make sure that signing a block of bytes always produces a signature that's
-// not just full of null bytes. a null signature is technically possible, but
-// it's vastly, vastly more likeky to be an error than a hash collision!
-func TestGetSignatureNonNull(t *testing.T) {
-	nullSignature := make([]byte, SignatureSize)
-	for _, data := range AllData {
-		signature, err := sign(data, hmacKeyData)
-		assert.NoError(t, err)
-
-		assert.NotEqual(t, signature, nullSignature)
 	}
 }
 
@@ -146,46 +100,25 @@ func TestGetSignatureIdentical(t *testing.T) {
 		copiedData := make([]byte, len(data))
 		copy(copiedData, data)
 
-		signature1, err := sign(data, hmacKeyData)
+		signature1, err := signSHA512(data, hmacKey)
 		assert.NoError(t, err)
 
-		signature2, err := sign(copiedData, hmacKeyData)
+		signature2, err := signSHA512(copiedData, hmacKey)
 		assert.NoError(t, err)
 
 		assert.Equal(t, signature1, signature2)
 	}
 }
 
-// a null signature (with extremely high probability) shouldn't verify
-func TestVerifyNullSignature(t *testing.T) {
-	for _, data := range AllData {
-		// create a signature with all null bytes
-		invalidSignature := make([]byte, SignatureSize)
-
-		err := verify(data, invalidSignature, hmacKeyData)
-		assert.Error(t, err)
-	}
-}
-
-// data with a random signature shouldn't verify
+// data with an invalid signature shouldn't verify
 func TestVerifyInvalidSignature(t *testing.T) {
 	for _, data := range AllData {
 		// create a signature of random bytes
-		invalidSignature := make([]byte, SignatureSize)
-		_, err := rand.Read(invalidSignature)
+		invalidSignature := sha512Signature{}
+		_, err := rand.Read(invalidSignature[:])
 		assert.NoError(t, err)
 
-		err = verify(data, invalidSignature, hmacKeyData)
-		assert.Error(t, err)
-	}
-}
-
-// a signature shorter than the default signature length shouldn't verify
-func TestVerifyShort(t *testing.T) {
-	for i := 0; i < SignatureSize; i++ {
-		shortSignature := make([]byte, i)
-
-		err := verify(ShortData, shortSignature, hmacKeyData)
+		err = verifySHA512(data, hmacKey, invalidSignature)
 		assert.Error(t, err)
 	}
 }
@@ -193,132 +126,134 @@ func TestVerifyShort(t *testing.T) {
 // signing and verifying data should work
 func TestSignAndVerify(t *testing.T) {
 	for _, data := range AllData {
-		signature, err := sign(data, hmacKeyData)
+		signature, err := signSHA512(data, hmacKey)
 		assert.NoError(t, err)
 
-		err = verify(data, signature, hmacKeyData)
+		err = verifySHA512(data, hmacKey, signature)
 		assert.NoError(t, err)
 	}
 }
 
-// hashed passwords should always output hashes of the determined key sizes
-func TestHashPasswordSize(t *testing.T) {
-	salt := make([]byte, SaltSize)
+// make sure we got the requested number of bytes out of the hash function
+func TestHashCorrectSize(t *testing.T) {
 	for _, data := range AllData {
-		encryptionKey, hmacKey, err := hashPassword(string(data), salt, 16, 2, 1)
-		assert.NoError(t, err)
+		size := 30
 
-		assert.Equal(t, EncryptionKeySize, len(encryptionKey))
-		assert.Equal(t, HMACKeySize, len(hmacKey))
+		data, err := hashScrypt(data, salt, 16, 2, 1, size)
+		assert.Len(t, data, size)
+		assert.NoError(t, err)
+	}
+}
+
+// this should dutifully provide us an empty byte array
+func TestHashZeroSize(t *testing.T) {
+	for _, data := range AllData {
+		data, err := hashScrypt(data, salt, 16, 2, 1, 0)
+		assert.Len(t, data, 0)
+		assert.NoError(t, err)
+	}
+}
+
+func TestHashOneSize(t *testing.T) {
+	for _, data := range AllData {
+		data, err := hashScrypt(data, salt, 16, 2, 1, 1)
+		assert.Len(t, data, 1)
+		assert.NoError(t, err)
+	}
+}
+
+func TestHashTwoSize(t *testing.T) {
+	for _, data := range AllData {
+		data, err := hashScrypt(data, salt, 16, 2, 1, 2)
+		assert.Len(t, data, 2)
+		assert.NoError(t, err)
+	}
+}
+
+// make sure we're not just getting null bytes
+func TestHashNonNull(t *testing.T) {
+	for _, data := range AllData {
+		size := 30
+
+		data, err := hashScrypt(data, salt, 16, 2, 1, size)
+		assert.NotEqual(t, make([]byte, size), data)
+		assert.NoError(t, err)
 	}
 }
 
 // shouldn't accept an N value that's not a power of two
 func TestHashPasswordNonPowerOfTwoN(t *testing.T) {
-	salt := make([]byte, SaltSize)
 	for _, data := range AllData {
-		_, _, err := hashPassword(string(data), salt, 15, 2, 1)
+		_, err := hashScrypt(data, salt, 15, 2, 1, 1)
 		assert.Error(t, err)
+		assert.Regexp(t, regexp.MustCompile(`\bN\b`), err.Error())
 	}
 }
 
 // shouldn't accept an N value that's zero
 func TestHashPasswordZeroN(t *testing.T) {
-	salt := make([]byte, SaltSize)
 	for _, data := range AllData {
-		_, _, err := hashPassword(string(data), salt, 0, 2, 1)
+		_, err := hashScrypt(data, salt, 0, 2, 1, 1)
 		assert.Error(t, err)
+		assert.Regexp(t, regexp.MustCompile(`\bN\b`), err.Error())
 	}
 }
 
 // shouldn't accept an N value that's one
 func TestHashPasswordOneN(t *testing.T) {
-	salt := make([]byte, SaltSize)
 	for _, data := range AllData {
-		_, _, err := hashPassword(string(data), salt, 1, 2, 1)
+		_, err := hashScrypt(data, salt, 1, 2, 1, 1)
 		assert.Error(t, err)
+		assert.Regexp(t, regexp.MustCompile(`\bN\b`), err.Error())
 	}
 }
 
 // shouldn't accept an `r` value that's zero
 func TestHashPasswordZeroR(t *testing.T) {
-	salt := make([]byte, SaltSize)
 	for _, data := range AllData {
-		_, _, err := hashPassword(string(data), salt, 16, 0, 1)
+		_, err := hashScrypt(data, salt, 16, 0, 1, 1)
 		assert.Error(t, err)
+		assert.Regexp(t, regexp.MustCompile(`\br\b`), err.Error())
 	}
 }
 
-// shouldn't accept an `p` value that's zero
+// shouldn't accept a `p` value that's zero
 func TestHashPasswordZeroP(t *testing.T) {
-	salt := make([]byte, SaltSize)
 	for _, data := range AllData {
-		_, _, err := hashPassword(string(data), salt, 16, 2, 0)
+		_, err := hashScrypt(data, salt, 16, 2, 0, 1)
 		assert.Error(t, err)
+		assert.Regexp(t, regexp.MustCompile(`\bp\b`), err.Error())
 	}
 }
 
-// getting version bytes should work
-func TestUint32ToBytesZero(t *testing.T) {
-	bytes, err := uint32ToBytes(0)
-	assert.NoError(t, err)
-	assert.Equal(t, bytes, make([]byte, VersionSize))
-}
+// the given byte slices should be populated in the order they're specified,
+// with the bytes filling them in the same order the bytes have been generated.
+// we don't need to re-test everything else since this function should be
+// delegating to the "plain" `hash` function.
+func TestHashFillPopulateInOrder(t *testing.T) {
+	for _, data := range AllData {
+		var (
+			size = 30
+			N = scryptN(16)
+			r = scryptR(2)
+			p = scryptP(1)
+		)
 
-// getting version bytes should return the result in big-endian mode
-func TestUint32ToBytesBigEndian(t *testing.T) {
-	bytes, err := uint32ToBytes(1)
-	assert.NoError(t, err)
-	assert.Equal(t, bytes, []byte{0, 0, 0, 1})
-}
-
-// parsing a too-short byte array should fail
-func TestBytesToUint32(t *testing.T) {
-	for i := 0; i < 4; i++ {
-		_, err := bytesToUint32(make([]byte, i))
-		assert.Error(t, err)
-	}
-}
-
-// parsing version bytes should work
-func TestBytesToUint32Zero(t *testing.T) {
-	version, err := bytesToUint32([]byte{0, 0, 0, 0})
-	assert.NoError(t, err)
-	assert.Equal(t, version, 0)
-}
-
-// parsing version bytes should interperet the result in big-endian mode
-func TestBytesToUint32BigEndian(t *testing.T) {
-	version, err := bytesToUint32([]byte{0, 0, 0, 1})
-	assert.NoError(t, err)
-	assert.Equal(t, version, 1)
-}
-
-// converting a uint32 to bytes and back should always produce the same result
-func TestUint32ToBytesAndBytesToUint32(t *testing.T) {
-	var i uint32
-	for i = 0; i < 1024; i++ {
-		iBytes, err := uint32ToBytes(i)
+		// get the original bytes
+		hashed, err := hashScrypt(data, salt, N, r, p, size)
 		assert.NoError(t, err)
 
-		newI, err := bytesToUint32(iBytes)
-		assert.NoError(t, err)
+		// make some slices from a single array, for easy comparison later
+		parts := make([]byte, size)
+		part1 := parts[:12]
+		part2 := parts[12:]
 
-		assert.Equal(t, i, newI)
-	}
-}
+		// fill the slices with the hashed bytes
+		hashFillScrypt(data, salt, N, r, p, part1, part2)
 
-// make sure encryption output is large enough to include all the needed data at
-// a minimum.
-func TestEncryptWithHashParamsHasMinimumOutputLength(t *testing.T) {
-	for _, plaintext := range AllData {
-		encrypted, err := EncryptWithHashParams(plaintext, "password", 8, 2, 1)
-		assert.NoError(t, err)
-
-		// we can never have less data than this, but since we compress the given
-		// plaintext, we may have less data than the length of the original
-		// plaintext!
-		assert.True(t, len(encrypted) >= minEncryptedLength)
+		// ensure they were filled in the correct order with the same bytes
+		// generated by the "plain" function.
+		assert.Equal(t, hashed, parts)
 	}
 }
 
@@ -327,34 +262,35 @@ func TestEncryptWithHashParamsHasMinimumOutputLength(t *testing.T) {
 // compression algorithm should reduce the size of with ease. the size of the
 // data should me much longer than the minimum encrypted length, in order to
 // ensure that the compression and encryption overhead is balanced out.
-func TestEncryptWithHashParamsIsCompressing(t *testing.T) {
+func TestEncryptIsCompressing(t *testing.T) {
 	// lots of zeros should compress very well!
-	repetitiousData := make([]byte, minEncryptedLength*10)
+	size := 10000
+	repetitiousData := make([]byte, size)
 
-	encrypted, err := EncryptWithHashParams(repetitiousData, "password", 8, 2, 1)
+	encrypted, err := Encrypt(repetitiousData, "password")
 	assert.NoError(t, err)
 
 	// in this case, the encrypted data should be smaller
-	assert.True(t, len(encrypted) < minEncryptedLength+len(repetitiousData))
+	assert.True(t, len(encrypted) < size)
 }
 
 // encrypting with an empty password should be allowed
 func TestEncryptWithHashParamsEmptyPassword(t *testing.T) {
 	for _, plaintext := range AllData {
-		_, err := EncryptWithHashParams(plaintext, "", 8, 2, 1)
+		_, err := Encrypt(plaintext, "")
 		assert.NoError(t, err)
 	}
 }
 
 // encrypting the same data two different times should always produce a
 // different blob, since the initialization vector and salt should be random.
-func TestEncryptWithHashParamsSameDataIsDifferent(t *testing.T) {
+func TestEncryptSameDataIsDifferent(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
-		encrypted1, err := EncryptWithHashParams(plaintext, password, 8, 2, 1)
+		encrypted1, err := Encrypt(plaintext, password)
 		assert.NoError(t, err)
 
-		encrypted2, err := EncryptWithHashParams(plaintext, password, 8, 2, 1)
+		encrypted2, err := Encrypt(plaintext, password)
 		assert.NoError(t, err)
 
 		assert.NotEqual(t, encrypted1, encrypted2)
@@ -362,25 +298,16 @@ func TestEncryptWithHashParamsSameDataIsDifferent(t *testing.T) {
 }
 
 // make sure we get the original data back after we encrypt and decrypt it
-func TestEncryptWithHashParamsAndDecrypt(t *testing.T) {
+func TestEncryptAndDecrypt(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
-		encrypted, err := EncryptWithHashParams(plaintext, password, 2, 7, 3)
+		encrypted, err := Encrypt(plaintext, password)
 		assert.NoError(t, err)
 
 		decrypted, err := Decrypt(encrypted, password)
 		assert.NoError(t, err)
 
 		assert.Equal(t, plaintext, decrypted)
-	}
-}
-
-// encrypting with a non-power-of-two N param should fail
-func TestEncryptWithHashParamsNonPowerOfTwoN(t *testing.T) {
-	password := "password"
-	for _, plaintext := range AllData {
-		_, err := EncryptWithHashParams(plaintext, password, 100, 2, 1)
-		assert.Error(t, err)
 	}
 }
 
@@ -401,7 +328,7 @@ func TestDecryptEmptyDataEmptyPasswordFails(t *testing.T) {
 func TestDecryptEmptyPasswordFails(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
-		encrypted, err := EncryptWithHashParams(plaintext, password, 2, 2, 1)
+		encrypted, err := Encrypt(plaintext, password)
 		assert.NoError(t, err)
 
 		_, err = Decrypt(encrypted, "")
@@ -413,7 +340,7 @@ func TestDecryptEmptyPasswordFails(t *testing.T) {
 func TestDecryptWrongPasswordFails(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
-		encrypted, err := EncryptWithHashParams(plaintext, password, 2, 2, 1)
+		encrypted, err := Encrypt(plaintext, password)
 		assert.NoError(t, err)
 
 		_, err = Decrypt(encrypted, "incorrect")
@@ -425,7 +352,7 @@ func TestDecryptWrongPasswordFails(t *testing.T) {
 func TestDecryptModifiedBlobFails(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
-		encrypted, err := EncryptWithHashParams(plaintext, password, 2, 2, 1)
+		encrypted, err := Encrypt(plaintext, password)
 		assert.NoError(t, err)
 
 		// change a single byte to throw off the checksum
@@ -440,26 +367,13 @@ func TestDecryptModifiedBlobFails(t *testing.T) {
 func TestDecryptEmptyPassword(t *testing.T) {
 	password := ""
 	for _, plaintext := range AllData {
-		encrypted, err := EncryptWithHashParams(plaintext, password, 2, 2, 1)
+		encrypted, err := Encrypt(plaintext, password)
 		assert.NoError(t, err)
 
 		decrypted, err := Decrypt(encrypted, password)
 		assert.NoError(t, err)
 		assert.Equal(t, plaintext, decrypted)
 	}
-}
-
-// make sure that we're using a good amount of memory when hashing. this helps
-// mitigate attacks by making a brute-force take lots of memory, not just CPU
-// time.
-func TestDefaultHashParametersUseEnoughMemory(t *testing.T) {
-	enoughMemoryBytes := 1024 * 1024 * 128
-	assert.Equal(t, int(128*HashN*HashR), enoughMemoryBytes)
-
-	// force periodic re-evaluation of these assumptions
-	msg := "Ensure that the assumptions made about scrypt paramters still hold!"
-	reevaluateDate := time.Date(2015, time.January, 1, 23, 0, 0, 0, time.UTC)
-	assert.True(t, time.Now().Before(reevaluateDate), msg)
 }
 
 // BENCHMARKS
@@ -470,45 +384,50 @@ func TestDefaultHashParametersUseEnoughMemory(t *testing.T) {
 
 // benchmark password hashing using the defaults used internally
 func BenchmarkHashPassword(b *testing.B) {
-	hashPasswordBenchmarkPassword := string(randomBytes[32:64])
-	hashPasswordBenchmarkSalt := randomBytes[:SaltSize]
+	hashPasswordBenchmarkPassword := randomBytes[32:64]
+	var hashPasswordBenchmarkSalt salt32
+	copy(hashPasswordBenchmarkSalt[:], randomBytes[:32])
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _, _ = hashPassword(
+		deoptimizer, _ = hashScrypt(
 			hashPasswordBenchmarkPassword,
 			hashPasswordBenchmarkSalt,
-			HashN, HashR, HashP)
+			1 << 16,
+			16,
+			2,
+			128,
+		)
 	}
 }
 
 func BenchmarkCompress(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = compress(randomBytes)
+		deoptimizer, _ = compressGzip(randomBytes)
 	}
 }
 
 func BenchmarkDecompress(b *testing.B) {
-	decompressBenchmarkData, _ := compress(randomBytes)
+	decompressBenchmarkData, _ := compressGzip(randomBytes)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = decompress(decompressBenchmarkData)
+		deoptimizer, _ = decompressGzip(decompressBenchmarkData)
 	}
 }
 
 func BenchmarkSign(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = sign(randomBytes, hmacKeyData)
+		deoptimizer, _ = signSHA512(randomBytes, hmacKey)
 	}
 }
 
 func BenchmarkVerify(b *testing.B) {
-	benchmarkDataSignature, _ := sign(randomBytes, hmacKeyData)
+	benchmarkDataSignature, _ := signSHA512(randomBytes, hmacKey)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		deoptimizer = verify(randomBytes, benchmarkDataSignature, hmacKeyData)
+		deoptimizer = verifySHA512(randomBytes, hmacKey, benchmarkDataSignature)
 	}
 }
 

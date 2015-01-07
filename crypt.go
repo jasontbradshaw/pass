@@ -5,56 +5,45 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"crypto/aes"
-	"crypto/cipher"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha512"
-	"encoding/binary"
 	"fmt"
 	"io/ioutil"
+	"reflect"
 
 	"code.google.com/p/go.crypto/scrypt"
+	"github.com/ugorji/go/codec"
 )
 
-// the current version of the encrypted format as a byte array
-const Version uint32 = 0
+// alias types to prevent mixing up the otherwise-unlabeled simple types used
+// all over the place.
+type aes256Key [32]byte
+type aesIV [aes.BlockSize]byte
+type salt32 [32]byte
+type scryptN int32
+type scryptP int32
+type scryptR int32
+type sha512Key [sha512.BlockSize]byte
+type sha512Signature [sha512.Size]byte
 
-// how large our version number is, in bytes. a uint32 should ALWAYS be 4 bytes,
-// so we just hard-code this here.
-const VersionSize = 4
+// encode something using msgpack and return the encoded bytes.
+// NOTE: you should probably pass in the thing to be encoded as a pointer!
+func encodeMsgpack(thingPointer interface{}) ([]byte, error) {
+	var (
+		out []byte
+		mh  codec.MsgpackHandle
+	)
+	enc := codec.NewEncoderBytes(&out, &mh)
+	err := enc.Encode(thingPointer)
+	if err != nil {
+		return nil, err
+	}
 
-// the size of the signature appended to signed data
-const SignatureSize = sha512.Size
-
-// the size of the random salt in bytes we use during password hashing
-const SaltSize = 32
-
-// the size of key to use for encryption. using 32 bytes (256 bits) selects
-// AES-256 encryption (see: http://golang.org/pkg/crypto/aes/#NewCipher).
-const EncryptionKeySize = 32
-
-// we want our HMAC keys to be the same size as the blocksize (see:
-// http://stackoverflow.com/a/12207647 and
-// http://en.wikipedia.org/wiki/Hash-based_message_authentication_code#Definition_.28from_RFC_2104.29).
-const HMACKeySize = sha512.BlockSize
-
-// the parameters to use when hashing the master password. we shoot for a memory
-// requirement of 128Mb (128 * N * r bytes).
-const HashN uint32 = 1 << 16 // 2^16
-const HashR uint32 = 16
-const HashP uint32 = 2
-
-// how large each hash parameter is, in bytes
-const HashParamSize = 4
-
-// the minimum size of encrypted content. it must include a version, the
-// password salt, the hashing parameters, an initialization vector, and a
-// signature - at a minimum!
-const minEncryptedLength = (VersionSize + SaltSize + (3 * HashParamSize) +
-	aes.BlockSize + SignatureSize)
+	return out, nil
+}
 
 // compress some data using the GZip algorithm and return it
-func compress(data []byte) ([]byte, error) {
+func compressGzip(data []byte) ([]byte, error) {
 	compressed := new(bytes.Buffer)
 	writer, err := gzip.NewWriterLevel(compressed, flate.BestCompression)
 	if err != nil {
@@ -69,7 +58,7 @@ func compress(data []byte) ([]byte, error) {
 }
 
 // decompress some data compressed by the GZip algorithm
-func decompress(data []byte) ([]byte, error) {
+func decompressGzip(data []byte) ([]byte, error) {
 	b := bytes.NewBuffer(data)
 	reader, err := gzip.NewReader(b)
 	if err != nil {
@@ -86,317 +75,163 @@ func decompress(data []byte) ([]byte, error) {
 	return result, nil
 }
 
-// get the signature of the given data as a byte array using SHA-512. the
-// resulting byte array will have a length of SignatureSize.
-func sign(data, key []byte) ([]byte, error) {
-	// we want the key to be no shorter than the hash algorithm's block size,
-	// otherwise it will be zero-padded. longer keys are hashed to obtain a key of
-	// the same size as the block size, so there's really no benefit in using a
-	// key size that's not equal to the block size of the hash algorithm. it
-	// doesn't hurt, however, so we let that case alone.
-	if len(key) < HMACKeySize {
-		err := fmt.Errorf("Key size is too small (should be %d bytes)",
-			HMACKeySize)
-		return nil, err
-	}
-
-	mac := hmac.New(sha512.New, key)
+// get the signature of the given data as a byte array using SHA-512
+//
+// NOTE: we want the key to be no shorter than the hash algorithm's block size,
+// otherwise it will be zero-padded. longer keys are hashed to obtain a key of
+// the same size as the block size, so there'really no benefit in using a key
+// size that's not equal to the block size of the hash algorithm. we just
+// enforce the exact key size to keep things simple.
+//
+// see:
+// * http://stackoverflow.com/a/12207647
+// * http://en.wikipedia.org/wiki/Hash-based_message_authentication_code#Definition_.28from_RFC_2104.29
+func signSHA512(data []byte, key sha512Key) (sha512Signature, error) {
+	mac := hmac.New(sha512.New, key[:])
 	mac.Write(data)
 
-	// compute and return the signature
-	return mac.Sum(nil), nil
-}
+	// copy the unsized-array from the sum into a sized array
+	var sig sha512Signature
+	n := copy(sig[:], mac.Sum(nil))
 
-// return whether the given signature verifies the given data
-func verify(data, suppliedSignature, key []byte) error {
-	// make sure the signature is the correct size
-	if len(suppliedSignature) != SignatureSize {
-		err := fmt.Errorf("Signature must be %d bytes long (got %d)",
-			SignatureSize, len(suppliedSignature))
-		return err
+	// ensure that we got a sum with the exact number of bytes we wanted
+	if n != sha512.Size {
+		return sha512Signature{}, fmt.Errorf(
+			"Signature didn't contain the correct number of bytes (got: %d, expected: %d)",
+			n, sha512.Size,
+		)
 	}
 
-	// sign the data ourself
-	computedSignature, err := sign(data, key)
+	return sig, nil
+}
+
+// return an error if the given signature doesn't verify the given data
+func verifySHA512(data []byte, key sha512Key, suppliedSignature sha512Signature) error {
+	// sign the data ourselves
+	computedSignature, err := signSHA512(data, key)
 	if err != nil {
 		return err
 	}
 
 	// signal an error if the computed signature doesn't match the given one.
 	// notice that we securely compare the signatures to avoid timing attacks!
-	if !hmac.Equal(suppliedSignature, computedSignature) {
-		err := fmt.Errorf(
-			"Signatures do not match:\n  supplied: %v\n  computed: %v)",
-			suppliedSignature, computedSignature)
-		return err
+	if !hmac.Equal(suppliedSignature[:], computedSignature[:]) {
+		return fmt.Errorf(
+			"Signatures do not match:\n  supplied: %v\n  computed: %v",
+			suppliedSignature, computedSignature,
+		)
 	}
 
 	// return no error since the data authenticated correctly
 	return nil
 }
 
-// encode the given version number as an array of bytes, then return the array
-// and whether there was an error.
-func uint32ToBytes(version uint32) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.BigEndian, version); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// read a version number from an array of bytes and return the version number
-// along with an error, if any.
-func bytesToUint32(versionBytes []byte) (uint32, error) {
-	// make sure we got enough bytes to parse a version out of them
-	if len(versionBytes) < VersionSize {
-		return 0, fmt.Errorf(
-			"Not enough bytes to contain a version (minimum: %d)", VersionSize)
-	}
-
-	// read the version from our bytes and return it
-	buf := bytes.NewBuffer(versionBytes)
-	var version uint32
-	if err := binary.Read(buf, binary.BigEndian, &version); err != nil {
-		return 0, err
-	}
-
-	return version, nil
-}
-
-// given a password string and a salt, return two byte arrays. the first should
-// be used for encryption, the second for HMAC.
-func hashPassword(password string, salt []byte, N, r, p uint32) ([]byte, []byte, error) {
-	// ensure that all the encryption paramters meet minimum requirements
-	if N <= 1 {
-		return nil, nil, fmt.Errorf("N must be larger than one")
-	} else if r <= 0 {
-		return nil, nil, fmt.Errorf("r must be larger than zero")
-	} else if p <= 0 {
-		return nil, nil, fmt.Errorf("p must be larger than zero")
-	}
-
+// given some bytes, a salt, and some scrypt params, return a byte slice with
+// the requested number of bytes.
+func hashScrypt(data []byte, salt salt32, N scryptN, r scryptR, p scryptP, size int) ([]byte, error) {
 	// NOTE: scrypt memory usage is approximately 128 * `N` * `r` bytes. since `p`
 	// has little effect on memory usage, it can be used to tune the running time
 	// of the algorithm.
 
-	// generate enough bytes for both the encryption and HMAC keys. additionally,
-	// since scrypt is checking the sizes of the paramter values for us, we don't
-	// need to do it ourselves (see:
+	// ensure that all the encryption parameters meet minimum requirements
+	if N <= 1 {
+		return nil, fmt.Errorf("N must be larger than one")
+	} else if r <= 0 {
+		return nil, fmt.Errorf("r must be larger than zero")
+	} else if p <= 0 {
+		return nil, fmt.Errorf("p must be larger than zero")
+	}
+
+	// generate the needed bytes. since scrypt is checking the sizes of the
+	// parameter values for us, we don't need to do it ourselves (see:
 	// http://code.google.com/p/go/source/browse/scrypt/scrypt.go?repo=crypto).
-	hash, err := scrypt.Key([]byte(password), salt, int(N), int(r), int(p),
-		EncryptionKeySize+HMACKeySize)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// return the keys according to our convention (encryption, then hmac)
-	encryptionKey := hash[:EncryptionKeySize]
-	hmacKey := hash[EncryptionKeySize:]
-	return encryptionKey, hmacKey, nil
+	return scrypt.Key(data, salt[:], int(N), int(r), int(p), size)
 }
 
-// encrypt some data using the given password and default scrypt params, then
-// return the result.
-func Encrypt(plaintext []byte, password string) ([]byte, error) {
-	// use the default params to encrypt this text
-	return EncryptWithHashParams(plaintext, password, HashN, HashR, HashP)
+// given some bytes, a salt, and some scrypt params, populate the given byte
+// slices with the bytes generated by scrypt-hashing the input data using the
+// given parameters. the slices are populated first-to-last, consuming the
+// generated bytes first-to-last as they're populated.
+func hashFillScrypt(data []byte, salt salt32, N scryptN, r scryptR, p scryptP, outputs ...[]byte) error {
+	// calculate the number of bytes we need to generate overall
+	size := 0
+	for _, b := range outputs {
+		size += len(b)
+	}
+
+	// generate the exact number of bytes we need
+	hashed, err := hashScrypt(data, salt, N, r, p, size)
+	if err != nil {
+		return err
+	}
+
+	// fill each output byte slice in turn with the generated bytes, in the order
+	// the bytes and slices were given to us.
+	offset := 0
+	for i, b := range outputs {
+		count := len(b)
+
+		n := copy(b, hashed[offset:offset+count])
+		if n != count {
+			return fmt.Errorf(
+				"Failed to copy enough bytes to fill output byte slice at index %d", i)
+		}
+
+		offset += count
+	}
+
+	return nil
 }
 
-// encrypt some data using the given password and scrypt params, then return the
-// result.
-func EncryptWithHashParams(plaintext []byte, password string, N, r, p uint32) ([]byte, error) {
-	// NOTE: no plaintext padding is needed since we're using CFB mode (see:
-	// http://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Padding).
-
-	// first, compress the plaintext to obfuscate its contents and reduce its size
-	compressedPlaintext, err := compress(plaintext)
-	if err != nil {
-		return nil, err
-	}
-
-	// make a blob that conforms to our defined structure
-	blob := NewBlob(
-		"version", VersionSize,
-		"N", HashParamSize,
-		"r", HashParamSize,
-		"p", HashParamSize,
-		"salt", SaltSize,
-		"iv", aes.BlockSize,
-		"data", len(compressedPlaintext),
-		"signature", SignatureSize,
-	)
-
-	// get the slices we'll be working with
-	version := blob.Get("version")
-	salt := blob.Get("salt")
-	blobN := blob.Get("N")
-	blobR := blob.Get("r")
-	blobP := blob.Get("p")
-	iv := blob.Get("iv")
-	ciphertext := blob.Get("data")
-	signature := blob.Get("signature")
-
-	// serialize and store the current version
-	versionBytes, err := uint32ToBytes(Version)
-	if err != nil {
-		return nil, err
-	}
-	copy(version, versionBytes)
-
-	// randomize the salt and the initialization vector
-	if _, err := rand.Read(salt); err != nil {
-		return nil, err
-	}
-	if _, err := rand.Read(iv); err != nil {
-		return nil, err
-	}
-
-	// serialize and store the hash paramters
-	nBytes, err := uint32ToBytes(N)
-	if err != nil {
-		return nil, err
-	}
-	copy(blobN, nBytes)
-
-	rBytes, err := uint32ToBytes(r)
-	if err != nil {
-		return nil, err
-	}
-	copy(blobR, rBytes)
-
-	pBytes, err := uint32ToBytes(p)
-	if err != nil {
-		return nil, err
-	}
-	copy(blobP, pBytes)
-
-	// hash the password into the necessary keys using the salt
-	encryptionKey, hmacKey, err := hashPassword(password, salt, N, r, p)
-	if err != nil {
-		return nil, err
-	}
-
-	// encrypt the compressed plaintext
-	block, err := aes.NewCipher(encryptionKey)
-	if err != nil {
-		return nil, err
-	}
-
-	// use CFB mode to encrypt the data, so we don't have to pad
-	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(ciphertext, compressedPlaintext)
-
-	// sign our data (everything _but_ the signature space)
-	content := blob.To("data")
-	signatureData, err := sign(content, hmacKey)
-	if err != nil {
-		return nil, err
-	}
-
-	// store the signature
-	copy(signature, signatureData)
-
-	return blob.Bytes(), nil
+// encrypt some data using the given password and the latest encryption function
+func Encrypt(data []byte, password string) ([]byte, error) {
+	return CryptVersionDatabase.LatestVersion().Encrypt(data, password)
 }
 
 // decrypt some data using the given password
 func Decrypt(data []byte, password string) ([]byte, error) {
-	// make sure our data is of at least the minimum length
-	if len(data) < minEncryptedLength {
-		err := fmt.Errorf("Data is too short to be valid (min length: %d)",
-			minEncryptedLength)
-		return nil, err
-	}
-
-	// make a blob that conforms to our defined structure
-	blob := NewBlob(
-		"version", VersionSize,
-		"N", HashParamSize,
-		"r", HashParamSize,
-		"p", HashParamSize,
-		"salt", SaltSize,
-		"iv", aes.BlockSize,
-
-		// the ciphertext is everything in the blob _except_ the other fields
-		"data", len(data)-(VersionSize+
-			SaltSize+
-			(3*HashParamSize)+
-			aes.BlockSize+
-			SignatureSize),
-
-		"signature", SignatureSize,
-
-		// initalize the blob with the encrypted data
-		data,
+	// parse the data as a simple map so we can extract the version
+	var (
+		meta map[string]interface{}
+		mh   codec.MsgpackHandle
 	)
 
-	// make sure we can decrypt this version
-	version, err := bytesToUint32(blob.Get("version"))
+	dec := codec.NewDecoderBytes(data, &mh)
+	err := dec.Decode(&meta)
 	if err != nil {
 		return nil, err
 	}
 
-	// we'll never be able to handle newer versions!
-	if version > Version {
-		return nil, fmt.Errorf("Latest supported version is %d (got: %d)",
-			Version, version)
+	// ensure that the blob included a version
+	versionNumberRaw, ok := meta["Version"]
+	if !ok {
+		return nil, fmt.Errorf("Data includes no \"Version\" field")
 	}
 
-	// decrypt using a version of the algorithm that matches the given blob
-	if version < Version {
-		// TODO: add support for older versions once they exist
-		panic("No older versions shoud exist at this time!")
+	// convert the version to the expected type. since we decoded into an
+	// interface type, the library decodes integers to int64. we convert to that
+	// in one step, then downconvert that into the specific type we need next.
+	versionNumberLarge, ok := versionNumberRaw.(int64)
+	if !ok {
+		versionNumberRawType := reflect.TypeOf(versionNumberRaw)
+		return nil, fmt.Errorf(
+			"\"Version\" value could not be read as int64 (got: %v, of type: %s)",
+			versionNumberRaw,
+			versionNumberRawType,
+		)
 	}
 
-	// read the the parts we need from the unverified data
-	salt := blob.Get("salt")
-	iv := blob.Get("iv")
-	ciphertext := blob.Get("data")
-	signature := blob.Get("signature")
+	// downconvert into our specific type. we shouldn't lose any information
+	// (assuming a well-formed blob) since we didn't put any more information than
+	// this into it in the first place!
+	versionNumber := cryptVersionNumber(versionNumberLarge)
 
-	// read the hash paramters we need to hash the password
-	N, err := bytesToUint32(blob.Get("N"))
-	if err != nil {
-		return nil, err
-	}
-	r, err := bytesToUint32(blob.Get("r"))
-	if err != nil {
-		return nil, err
-	}
-	p, err := bytesToUint32(blob.Get("p"))
-	if err != nil {
-		return nil, err
+	// decrypt based on the indicated version
+	cryptRecord, ok := CryptVersionDatabase.FindVersion(versionNumber)
+	if !ok {
+		return nil, fmt.Errorf("Unable to read file of version %d", versionNumber)
 	}
 
-	// hash the password with the supplied salt and paramters to get the keys
-	encryptionKey, hmacKey, err := hashPassword(password, salt, N, r, p)
-	if err != nil {
-		return nil, err
-	}
-
-	// verify the integrity of the blob (including the version)
-	err = verify(blob.To("data"), signature, hmacKey)
-	if err != nil {
-		return nil, err
-	}
-
-	// decrypt the ciphertext
-	block, err := aes.NewCipher(encryptionKey)
-	if err != nil {
-		return nil, err
-	}
-
-	// decrypt directly into the original slice to save creating a new array
-	compressedPlaintext := ciphertext[:]
-	stream := cipher.NewCFBDecrypter(block, iv)
-	stream.XORKeyStream(compressedPlaintext, ciphertext)
-
-	// decompress the compressed plaintext
-	plaintext, err := decompress(compressedPlaintext)
-	if err != nil {
-		return nil, err
-	}
-
-	return plaintext, nil
+	// decrypt the data using the given version's decryption function
+	return cryptRecord.Decrypt(data, password)
 }
