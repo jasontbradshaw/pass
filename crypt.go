@@ -9,6 +9,7 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"io/ioutil"
+	"reflect"
 
 	"code.google.com/p/go.crypto/scrypt"
 	"github.com/ugorji/go/codec"
@@ -207,11 +208,23 @@ func Decrypt(data []byte, password string) ([]byte, error) {
 		return nil, fmt.Errorf("Data includes no \"Version\" field")
 	}
 
-	// convert the version to the expected type
-	versionNumber, ok := versionNumberRaw.(cryptVersionNumber)
+	// convert the version to the expected type. since we decoded into an
+	// interface type, the library decodes integers to int64. we convert to that
+	// in one step, then downconvert that into the specific type we need next.
+	versionNumberLarge, ok := versionNumberRaw.(int64)
 	if !ok {
-		return nil, fmt.Errorf("\"Version\" value could not be read as a version number")
+		versionNumberRawType := reflect.TypeOf(versionNumberRaw)
+		return nil, fmt.Errorf(
+			"\"Version\" value could not be read as int64 (got: %v, of type: %s)",
+			versionNumberRaw,
+			versionNumberRawType,
+		)
 	}
+
+	// downconvert into our specific type. we shouldn't lose any information
+	// (assuming a well-formed blob) since we didn't put any more information than
+	// this into it in the first place!
+	versionNumber := cryptVersionNumber(versionNumberLarge)
 
 	// decrypt based on the indicated version
 	cryptRecord, ok := CryptVersionDatabase.FindVersion(versionNumber)
