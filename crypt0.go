@@ -57,7 +57,7 @@ func encrypt0(plaintext []byte, password string) ([]byte, error) {
 	}
 
 	// hash the password into an AES-256 key and HMAC key
-	err = hashPasswordScrypt(password, salt, N, r, p, encryptionKey[:], hmacKey[:])
+	err = hashFillScrypt([]byte(password), salt, N, r, p, encryptionKey[:], hmacKey[:])
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func encrypt0(plaintext []byte, password string) ([]byte, error) {
 
 	// uses CFB mode to encrypt the data, so we don't have to pad the input (see:
 	// http://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Padding).
-	var ciphertext []byte
+	ciphertext := make([]byte, len(compressedPlaintext))
 	stream := cipher.NewCFBEncrypter(block, iv[:])
 	stream.XORKeyStream(ciphertext, compressedPlaintext)
 
@@ -134,7 +134,7 @@ func decrypt0(signedMeta []byte, password string) ([]byte, error) {
 		encryptionKey aes256Key
 		hmacKey       sha512Key
 	)
-	err = hashPasswordScrypt(password, meta.Salt,
+	err = hashFillScrypt([]byte(password), meta.Salt,
 		meta.ScryptN, meta.ScryptR, meta.ScryptP, encryptionKey[:], hmacKey[:])
 	if err != nil {
 		return nil, err
