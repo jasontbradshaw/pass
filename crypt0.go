@@ -1,8 +1,6 @@
 package pass
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha512"
 
@@ -20,7 +18,7 @@ type cryptData0 struct {
 	ScryptN    scryptN
 	ScryptR    scryptR
 	ScryptP    scryptP
-	Salt       salt32
+	Salt       salt128
 	IV         aesIV
 	Ciphertext []byte
 }
@@ -28,7 +26,7 @@ type cryptData0 struct {
 func encrypt0(plaintext []byte, password string) ([]byte, error) {
 	var (
 		// these get populated later
-		salt          salt32
+		salt          salt128
 		iv            aesIV
 		encryptionKey aes256Key
 		hmacKey       sha512Key
@@ -63,16 +61,7 @@ func encrypt0(plaintext []byte, password string) ([]byte, error) {
 	}
 
 	// encrypt the compressed plaintext
-	block, err := aes.NewCipher(encryptionKey[:])
-	if err != nil {
-		return nil, err
-	}
-
-	// uses CFB mode to encrypt the data, so we don't have to pad the input (see:
-	// http://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Padding).
-	ciphertext := make([]byte, len(compressedPlaintext))
-	stream := cipher.NewCFBEncrypter(block, iv[:])
-	stream.XORKeyStream(ciphertext, compressedPlaintext)
+	ciphertext, err := encryptAES256CFB(compressedPlaintext, iv, encryptionKey)
 
 	// the struct used to serialize the data to msgpack
 	meta := cryptData0{
@@ -147,17 +136,8 @@ func decrypt0(signedMeta []byte, password string) ([]byte, error) {
 		return nil, err
 	}
 
-	// decrypt the ciphertext
-	block, err := aes.NewCipher(encryptionKey[:])
-	if err != nil {
-		return nil, err
-	}
-
-	compressedPlaintext := make([]byte, len(meta.Ciphertext))
-	stream := cipher.NewCFBDecrypter(block, meta.IV[:])
-	stream.XORKeyStream(compressedPlaintext, meta.Ciphertext)
-
-	// decompress and return the plaintext
+	// decrypt, decompress, and return the plaintext
+	compressedPlaintext, err := decryptAES256CFB(meta.Ciphertext, meta.IV, encryptionKey)
 	plaintext, err := decompressGzip(compressedPlaintext)
 	if err != nil {
 		return nil, err

@@ -34,7 +34,7 @@ var _, _ = rand.Read(randomBytes)
 var hmacKey sha512Key = sha512Key{}
 var _ int = copy(hmacKey[:], randomBytes)
 
-var salt salt32 = salt32{}
+var salt salt128 = salt128{}
 var _ int = copy(salt[:], randomBytes)
 
 // skip the given test if running in short mode
@@ -234,9 +234,9 @@ func TestHashFillPopulateInOrder(t *testing.T) {
 	for _, data := range AllData {
 		var (
 			size = 30
-			N = scryptN(16)
-			r = scryptR(2)
-			p = scryptP(1)
+			N    = scryptN(16)
+			r    = scryptR(2)
+			p    = scryptP(1)
 		)
 
 		// get the original bytes
@@ -385,7 +385,7 @@ func TestDecryptEmptyPassword(t *testing.T) {
 // benchmark password hashing using the defaults used internally
 func BenchmarkHashPassword(b *testing.B) {
 	hashPasswordBenchmarkPassword := randomBytes[32:64]
-	var hashPasswordBenchmarkSalt salt32
+	var hashPasswordBenchmarkSalt salt128
 	copy(hashPasswordBenchmarkSalt[:], randomBytes[:32])
 
 	b.ResetTimer()
@@ -393,7 +393,7 @@ func BenchmarkHashPassword(b *testing.B) {
 		deoptimizer, _ = hashScrypt(
 			hashPasswordBenchmarkPassword,
 			hashPasswordBenchmarkSalt,
-			1 << 16,
+			1<<16,
 			16,
 			2,
 			128,
