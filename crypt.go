@@ -184,7 +184,8 @@ func hashFillScrypt(data []byte, salt salt128, N scryptN, r scryptR, p scryptP, 
 	return nil
 }
 
-// encrypts the given byte array using AES-256 and returns the resulting bytes
+// encrypts the given byte array using AES-256 in CFB mode and returns the
+// resulting bytes.
 func encryptAES256CFB(plaintext []byte, iv aesIV, key aes256Key) ([]byte, error) {
 	// encrypt the compressed plaintext
 	block, err := aes.NewCipher(key[:])
@@ -201,7 +202,8 @@ func encryptAES256CFB(plaintext []byte, iv aesIV, key aes256Key) ([]byte, error)
 	return ciphertext, nil
 }
 
-// decrypts the given byte array using AES-256 and returns the resulting bytes
+// decrypts the given byte array using AES-256 in CFB mode and returns the
+// resulting bytes.
 func decryptAES256CFB(ciphertext []byte, iv aesIV, key aes256Key) ([]byte, error) {
 	// decrypt the ciphertext
 	block, err := aes.NewCipher(key[:])

@@ -31,6 +31,12 @@ var randomBytes = make([]byte, 512)
 var _, _ = rand.Read(randomBytes)
 
 // fill some arbitrary bits with random data
+var key aes256Key = aes256Key{}
+var _ int = copy(key[:], randomBytes)
+
+var iv aesIV = aesIV{}
+var _ int = copy(iv[:], randomBytes)
+
 var hmacKey sha512Key = sha512Key{}
 var _ int = copy(hmacKey[:], randomBytes)
 
@@ -45,7 +51,7 @@ func skipIfShort(t *testing.T) {
 }
 
 // should be able to decompress the compressed empty array
-func TestDecompressMinCompressed(t *testing.T) {
+func TestDecompressGzipMinCompressed(t *testing.T) {
 	compressed, err := compressGzip(EmptyData)
 	assert.NoError(t, err)
 
@@ -55,7 +61,7 @@ func TestDecompressMinCompressed(t *testing.T) {
 	assert.Equal(t, decompressed, EmptyData)
 }
 
-func TestDecompressTooShort(t *testing.T) {
+func TestDecompressGzipTooShort(t *testing.T) {
 	minCompressed, err := compressGzip([]byte{})
 	assert.NoError(t, err)
 
@@ -70,7 +76,7 @@ func TestDecompressTooShort(t *testing.T) {
 }
 
 // decompressing invalid data should fail
-func TestDecompressInvalid(t *testing.T) {
+func TestDecompressGzipInvalid(t *testing.T) {
 	// null data is certainly invalid
 	data := make([]byte, 50)
 
@@ -81,7 +87,7 @@ func TestDecompressInvalid(t *testing.T) {
 // compression and decompression are inverse operations, and therefor passing
 // input through the compressor and then the decompressor should yield the input
 // data once again.
-func TestCompressAndDecompress(t *testing.T) {
+func TestCompressGzipAndDecompressGzip(t *testing.T) {
 	for _, data := range AllData {
 		compressed, err := compressGzip(data)
 		assert.NoError(t, err)
@@ -95,7 +101,7 @@ func TestCompressAndDecompress(t *testing.T) {
 
 // make sure that signing identical (but distinct) blocks of bytes always
 // produces the same signature.
-func TestGetSignatureIdentical(t *testing.T) {
+func TestSignSHA512Identical(t *testing.T) {
 	for _, data := range AllData {
 		copiedData := make([]byte, len(data))
 		copy(copiedData, data)
@@ -111,7 +117,7 @@ func TestGetSignatureIdentical(t *testing.T) {
 }
 
 // data with an invalid signature shouldn't verify
-func TestVerifyInvalidSignature(t *testing.T) {
+func TestVerifySHA512InvalidSignature(t *testing.T) {
 	for _, data := range AllData {
 		// create a signature of random bytes
 		invalidSignature := sha512Signature{}
@@ -124,7 +130,7 @@ func TestVerifyInvalidSignature(t *testing.T) {
 }
 
 // signing and verifying data should work
-func TestSignAndVerify(t *testing.T) {
+func TestSignSHA512AndVerifySHA512(t *testing.T) {
 	for _, data := range AllData {
 		signature, err := signSHA512(data, hmacKey)
 		assert.NoError(t, err)
@@ -135,7 +141,7 @@ func TestSignAndVerify(t *testing.T) {
 }
 
 // make sure we got the requested number of bytes out of the hash function
-func TestHashCorrectSize(t *testing.T) {
+func TestHashScryptCorrectSize(t *testing.T) {
 	for _, data := range AllData {
 		size := 30
 
@@ -146,7 +152,7 @@ func TestHashCorrectSize(t *testing.T) {
 }
 
 // this should dutifully provide us an empty byte array
-func TestHashZeroSize(t *testing.T) {
+func TestHashScryptZeroSize(t *testing.T) {
 	for _, data := range AllData {
 		data, err := hashScrypt(data, salt, 16, 2, 1, 0)
 		assert.Len(t, data, 0)
@@ -154,7 +160,7 @@ func TestHashZeroSize(t *testing.T) {
 	}
 }
 
-func TestHashOneSize(t *testing.T) {
+func TestHashScryptOneSize(t *testing.T) {
 	for _, data := range AllData {
 		data, err := hashScrypt(data, salt, 16, 2, 1, 1)
 		assert.Len(t, data, 1)
@@ -162,7 +168,7 @@ func TestHashOneSize(t *testing.T) {
 	}
 }
 
-func TestHashTwoSize(t *testing.T) {
+func TestHashScryptTwoSize(t *testing.T) {
 	for _, data := range AllData {
 		data, err := hashScrypt(data, salt, 16, 2, 1, 2)
 		assert.Len(t, data, 2)
@@ -171,7 +177,7 @@ func TestHashTwoSize(t *testing.T) {
 }
 
 // make sure we're not just getting null bytes
-func TestHashNonNull(t *testing.T) {
+func TestHashScryptNonNull(t *testing.T) {
 	for _, data := range AllData {
 		size := 30
 
@@ -182,7 +188,7 @@ func TestHashNonNull(t *testing.T) {
 }
 
 // shouldn't accept an N value that's not a power of two
-func TestHashPasswordNonPowerOfTwoN(t *testing.T) {
+func TestHashScryptNonPowerOfTwoN(t *testing.T) {
 	for _, data := range AllData {
 		_, err := hashScrypt(data, salt, 15, 2, 1, 1)
 		assert.Error(t, err)
@@ -191,7 +197,7 @@ func TestHashPasswordNonPowerOfTwoN(t *testing.T) {
 }
 
 // shouldn't accept an N value that's zero
-func TestHashPasswordZeroN(t *testing.T) {
+func TestHashScryptZeroN(t *testing.T) {
 	for _, data := range AllData {
 		_, err := hashScrypt(data, salt, 0, 2, 1, 1)
 		assert.Error(t, err)
@@ -200,7 +206,7 @@ func TestHashPasswordZeroN(t *testing.T) {
 }
 
 // shouldn't accept an N value that's one
-func TestHashPasswordOneN(t *testing.T) {
+func TestHashScryptOneN(t *testing.T) {
 	for _, data := range AllData {
 		_, err := hashScrypt(data, salt, 1, 2, 1, 1)
 		assert.Error(t, err)
@@ -209,7 +215,7 @@ func TestHashPasswordOneN(t *testing.T) {
 }
 
 // shouldn't accept an `r` value that's zero
-func TestHashPasswordZeroR(t *testing.T) {
+func TestHashScryptZeroR(t *testing.T) {
 	for _, data := range AllData {
 		_, err := hashScrypt(data, salt, 16, 0, 1, 1)
 		assert.Error(t, err)
@@ -218,7 +224,7 @@ func TestHashPasswordZeroR(t *testing.T) {
 }
 
 // shouldn't accept a `p` value that's zero
-func TestHashPasswordZeroP(t *testing.T) {
+func TestHashScryptZeroP(t *testing.T) {
 	for _, data := range AllData {
 		_, err := hashScrypt(data, salt, 16, 2, 0, 1)
 		assert.Error(t, err)
@@ -230,7 +236,7 @@ func TestHashPasswordZeroP(t *testing.T) {
 // with the bytes filling them in the same order the bytes have been generated.
 // we don't need to re-test everything else since this function should be
 // delegating to the "plain" `hash` function.
-func TestHashFillPopulateInOrder(t *testing.T) {
+func TestHashFillScryptPopulateInOrder(t *testing.T) {
 	for _, data := range AllData {
 		var (
 			size = 30
