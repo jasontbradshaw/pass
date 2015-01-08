@@ -218,29 +218,24 @@ func decryptAES256CFB(ciphertext []byte, iv aesIV, key aes256Key) ([]byte, error
 	return plaintext, nil
 }
 
-// encrypt some data using the given password and the latest encryption function
-func Encrypt(data []byte, password string) ([]byte, error) {
-	return CryptVersions.Latest().Encrypt(data, password)
-}
-
-// decrypt some data using the given password
-func Decrypt(data []byte, password string) ([]byte, error) {
+// gets the reputed version of a blob, or an error if that wasn't possible
+func getBlobVersion(blob []byte) (cryptVersionNumber, error) {
 	// parse the data as a simple map so we can extract the version
 	var (
 		meta map[string]interface{}
 		mh   codec.MsgpackHandle
 	)
 
-	dec := codec.NewDecoderBytes(data, &mh)
+	dec := codec.NewDecoderBytes(blob, &mh)
 	err := dec.Decode(&meta)
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
 
 	// ensure that the blob included a version
 	versionNumberRaw, ok := meta["Version"]
 	if !ok {
-		return nil, fmt.Errorf("Data includes no \"Version\" field")
+		return -1, fmt.Errorf("Blob includes no \"Version\" field")
 	}
 
 	// convert the version to the expected type. since we decoded into an
@@ -249,7 +244,7 @@ func Decrypt(data []byte, password string) ([]byte, error) {
 	versionNumberLarge, ok := versionNumberRaw.(int64)
 	if !ok {
 		versionNumberRawType := reflect.TypeOf(versionNumberRaw)
-		return nil, fmt.Errorf(
+		return -1, fmt.Errorf(
 			"\"Version\" value could not be read as int64 (got: %v, of type: %s)",
 			versionNumberRaw,
 			versionNumberRawType,
@@ -259,9 +254,23 @@ func Decrypt(data []byte, password string) ([]byte, error) {
 	// downconvert into our specific type. we shouldn't lose any information
 	// (assuming a well-formed blob) since we didn't put any more information than
 	// this into it in the first place!
-	versionNumber := cryptVersionNumber(versionNumberLarge)
+	return cryptVersionNumber(versionNumberLarge), nil
+}
 
-	// decrypt based on the indicated version
+// encrypt some data using the given password and the latest encryption function
+func Encrypt(data []byte, password string) ([]byte, error) {
+	return CryptVersions.Latest().Encrypt(data, password)
+}
+
+// decrypt some data using the given password
+func Decrypt(data []byte, password string) ([]byte, error) {
+	// try to get a version number from the given data
+	versionNumber, err := getBlobVersion(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// delegate decryption based on the indicated version
 	cryptRecord, ok := CryptVersions.Find(versionNumber)
 	if !ok {
 		return nil, fmt.Errorf("Unable to read file of version %d", versionNumber)
