@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/ugorji/go/codec"
 )
 
 // used for testing empty data
@@ -351,47 +350,8 @@ func TestEncryptAES256CFBAndDecryptAES256CFB(t *testing.T) {
 	}
 }
 
-// make sure that encrypting the data is doing some sort of compression. we
-// supply it with a large amount of repetitious data, which any self-respecting
-// compression algorithm should reduce the size of with ease. the size of the
-// data should me much longer than the minimum encrypted length, in order to
-// ensure that the compression and encryption overhead is balanced out.
-func TestEncryptIsCompressing(t *testing.T) {
-	// lots of zeros should compress very well!
-	size := 10000
-	repetitiousData := make([]byte, size)
-
-	encrypted, err := Encrypt(repetitiousData, "password")
-	assert.NoError(t, err)
-
-	// in this case, the encrypted data should be smaller
-	assert.True(t, len(encrypted) < size)
-}
-
-// encrypting with an empty password should be allowed
-func TestEncryptWithHashParamsEmptyPassword(t *testing.T) {
-	for _, plaintext := range AllData {
-		_, err := Encrypt(plaintext, "")
-		assert.NoError(t, err)
-	}
-}
-
-// encrypting the same data two different times should always produce a
-// different blob, since the initialization vector and salt should be random.
-func TestEncryptSameDataIsDifferent(t *testing.T) {
-	password := "password"
-	for _, plaintext := range AllData {
-		encrypted1, err := Encrypt(plaintext, password)
-		assert.NoError(t, err)
-
-		encrypted2, err := Encrypt(plaintext, password)
-		assert.NoError(t, err)
-
-		assert.NotEqual(t, encrypted1, encrypted2)
-	}
-}
-
-// make sure we get the original data back after we encrypt and decrypt it
+// make sure we get the original data back after we encrypt and decrypt it with
+// the top-level public functions.
 func TestEncryptAndDecrypt(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
@@ -468,20 +428,6 @@ func TestDecryptEmptyPassword(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, plaintext, decrypted)
 	}
-}
-
-// make sure we get msgpack data back from encryption
-func TestEncryptYieldsMsgpack(t *testing.T) {
-	ciphertext, err := Encrypt(ShortData, "password")
-	assert.NoError(t, err)
-
-	var (
-		msgpack map[string]interface{}
-		mh      codec.MsgpackHandle
-	)
-	dec := codec.NewDecoderBytes(ciphertext, &mh)
-	err = dec.Decode(&msgpack)
-	assert.NoError(t, err)
 }
 
 // BENCHMARKS

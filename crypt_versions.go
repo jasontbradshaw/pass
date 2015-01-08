@@ -16,7 +16,7 @@ type cryptVersionRecord struct {
 
 // a container that holds all the available version container in an immutable
 // manner, to prevent any modification of the canonical source list.
-type cryptVersionDatabase struct {
+type cryptVersions struct {
 	// an ordered list of crypt versions, from oldest to newest. the last item in
 	// the slice is guaranteed to be the latest version!
 	versions []cryptVersionRecord
@@ -27,7 +27,7 @@ type cryptVersionDatabase struct {
 
 // given a bunch of versions, builds the internal version list and populates the
 // lookup map.
-func newCryptVersionDatabase(records ...cryptVersionRecord) cryptVersionDatabase {
+func newCryptVersions(records ...cryptVersionRecord) cryptVersions {
 	if len(records) == 0 {
 		panic("Must be called with at least one version record")
 	}
@@ -48,27 +48,27 @@ func newCryptVersionDatabase(records ...cryptVersionRecord) cryptVersionDatabase
 		versionsById[v.Version] = &v
 	}
 
-	return cryptVersionDatabase{
+	return cryptVersions{
 		versions,
 		versionsById,
 	}
 }
 
 // returns a copy of all the internal version records
-func (c *cryptVersionDatabase) Versions() []cryptVersionRecord {
+func (c *cryptVersions) Versions() []cryptVersionRecord {
 	records := make([]cryptVersionRecord, len(c.versions))
 	copy(records, c.versions)
 	return records
 }
 
 // get a copy of the latest available crypt version's record
-func (c *cryptVersionDatabase) LatestVersion() cryptVersionRecord {
+func (c *cryptVersions) LatestVersion() cryptVersionRecord {
 	return c.versions[len(c.versions)-1]
 }
 
 // get a copy of the given version's record, returning "not ok" if a record with
 // the given version number couldn't be found.
-func (c *cryptVersionDatabase) FindVersion(requestedVersion cryptVersionNumber) (cryptVersionRecord, bool) {
+func (c *cryptVersions) FindVersion(requestedVersion cryptVersionNumber) (cryptVersionRecord, bool) {
 	record, ok := c.versionsById[requestedVersion]
 	if !ok {
 		return cryptVersionRecord{}, false
@@ -78,9 +78,9 @@ func (c *cryptVersionDatabase) FindVersion(requestedVersion cryptVersionNumber) 
 }
 
 // expose the canonical list of available versions, as defined by their
-// respective files. we maintain this _here and only here_ to prevent modifying
-// the version database, which we want to be immutable for all intents and
-// purposes.
-var CryptVersionDatabase cryptVersionDatabase = newCryptVersionDatabase(
+// respective files.
+// NOTE: we maintain this _here and only here_ to prevent modifying the version
+// database, which we want to be immutable for all intents and purposes.
+var CryptVersions cryptVersions = newCryptVersions(
 	cryptVersionRecord0,
 )
