@@ -38,12 +38,12 @@ func TestModifyingARecordShouldNotAffectTheDatabase(t *testing.T) {
 	r := cryptVersionRecord{0, nil, nil}
 	db := newCryptVersions(r)
 
-	assert.Equal(t, r.Version, db.Versions()[0].Version)
+	assert.Equal(t, r.Version, db.All()[0].Version)
 
 	r.Version = 1
 	assert.Equal(t, 1, r.Version)
 
-	assert.Equal(t, 0, db.Versions()[0].Version)
+	assert.Equal(t, 0, db.All()[0].Version)
 }
 
 func TestVersionsListShouldBeSameLengthAsGivenRecords(t *testing.T) {
@@ -53,44 +53,44 @@ func TestVersionsListShouldBeSameLengthAsGivenRecords(t *testing.T) {
 		cryptVersionRecord{1, nil, nil},
 	)
 
-	assert.Len(t, db.Versions(), 3)
+	assert.Len(t, db.All(), 3)
 }
 
 func TestModifyingTheVersionsListShouldNotModifyTheDatabase(t *testing.T) {
 	r := cryptVersionRecord{0, nil, nil}
 	db := newCryptVersions(r)
 
-	versions := db.Versions()
+	versions := db.All()
 
 	versions[0] = cryptVersionRecord{1, nil, nil}
-	assert.Equal(t, 0, db.Versions()[0].Version)
+	assert.Equal(t, 0, db.All()[0].Version)
 }
 
 func TestModifyingAVersionsListRecordShouldNotModifyTheDatabase(t *testing.T) {
 	r := cryptVersionRecord{0, nil, nil}
 	db := newCryptVersions(r)
 
-	versions := db.Versions()
+	versions := db.All()
 
 	versions[0].Version = 1
-	assert.Equal(t, 0, db.Versions()[0].Version)
+	assert.Equal(t, 0, db.All()[0].Version)
 }
 
-func TestLatestVersionOneVersion(t *testing.T) {
+func TestLatestOneVersion(t *testing.T) {
 	r := cryptVersionRecord{0, nil, nil}
 	db := newCryptVersions(r)
 
-	latest := db.LatestVersion()
+	latest := db.Latest()
 
 	assert.Equal(t, r, latest)
 }
 
-func TestLatestVersionTwoVersions(t *testing.T) {
+func TestLatestTwoVersions(t *testing.T) {
 	r := cryptVersionRecord{0, nil, nil}
 	s := cryptVersionRecord{1, nil, nil}
 	db := newCryptVersions(r, s)
 
-	latest := db.LatestVersion()
+	latest := db.Latest()
 
 	assert.Equal(t, s, latest)
 }
@@ -99,10 +99,10 @@ func TestModifyingLatestVersionShouldNotModifyDatabase(t *testing.T) {
 	r := cryptVersionRecord{0, nil, nil}
 	db := newCryptVersions(r)
 
-	latest := db.LatestVersion()
+	latest := db.Latest()
 	latest.Version = 1
 
-	assert.Equal(t, 0, db.Versions()[0].Version)
+	assert.Equal(t, 0, db.All()[0].Version)
 }
 
 func TestVersionsShouldNotBeReordered(t *testing.T) {
@@ -110,7 +110,7 @@ func TestVersionsShouldNotBeReordered(t *testing.T) {
 	s := cryptVersionRecord{1, nil, nil}
 	db := newCryptVersions(s, r)
 
-	latest := db.LatestVersion()
+	latest := db.Latest()
 
 	assert.Equal(t, r, latest)
 }
@@ -120,7 +120,7 @@ func TestFindVersionShouldFindAnExistingVersion(t *testing.T) {
 	s := cryptVersionRecord{1, nil, nil}
 	db := newCryptVersions(s, r)
 
-	version, ok := db.FindVersion(0)
+	version, ok := db.Find(0)
 
 	assert.True(t, ok)
 	assert.Equal(t, r, version)
@@ -131,7 +131,7 @@ func TestFindVersionShouldReturnNotOkIfNoVersionIsFound(t *testing.T) {
 	s := cryptVersionRecord{1, nil, nil}
 	db := newCryptVersions(s, r)
 
-	_, ok := db.FindVersion(3)
+	_, ok := db.Find(3)
 	assert.False(t, ok)
 }
 
@@ -140,13 +140,13 @@ func TestModifyingFoundVersionShouldNotModifyDatabase(t *testing.T) {
 	s := cryptVersionRecord{1, nil, nil}
 	db := newCryptVersions(r, s)
 
-	version, _ := db.FindVersion(0)
+	version, _ := db.Find(0)
 	version.Version = 2
 
-	assert.Equal(t, 0, db.Versions()[0].Version)
+	assert.Equal(t, 0, db.All()[0].Version)
 }
 
 func TestCryptVersionsShouldContainVersionRecords(t *testing.T) {
 	assert.NotNil(t, CryptVersions)
-	assert.True(t, len(CryptVersions.Versions()) > 0)
+	assert.True(t, len(CryptVersions.All()) > 0)
 }

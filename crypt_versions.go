@@ -55,20 +55,20 @@ func newCryptVersions(records ...cryptVersionRecord) cryptVersions {
 }
 
 // returns a copy of all the internal version records
-func (c *cryptVersions) Versions() []cryptVersionRecord {
+func (c *cryptVersions) All() []cryptVersionRecord {
 	records := make([]cryptVersionRecord, len(c.versions))
 	copy(records, c.versions)
 	return records
 }
 
 // get a copy of the latest available crypt version's record
-func (c *cryptVersions) LatestVersion() cryptVersionRecord {
+func (c *cryptVersions) Latest() cryptVersionRecord {
 	return c.versions[len(c.versions)-1]
 }
 
 // get a copy of the given version's record, returning "not ok" if a record with
 // the given version number couldn't be found.
-func (c *cryptVersions) FindVersion(requestedVersion cryptVersionNumber) (cryptVersionRecord, bool) {
+func (c *cryptVersions) Find(requestedVersion cryptVersionNumber) (cryptVersionRecord, bool) {
 	record, ok := c.versionsById[requestedVersion]
 	if !ok {
 		return cryptVersionRecord{}, false

@@ -12,7 +12,7 @@ var Data []byte = []byte("insert super important data here")
 
 // make sure we get msgpack data back from encryption
 func TestEncryptYieldsMsgpack(t *testing.T) {
-	for _, version := range CryptVersions.Versions() {
+	for _, version := range CryptVersions.All() {
 		ciphertext, err := version.Encrypt(Data, "password")
 		assert.NoError(t, err)
 
@@ -35,7 +35,7 @@ func TestEncryptUsesLatestVersion(t *testing.T) {
 // NOTE: this is necessary so the top-level functions can delegate to a specific
 // algorithm when decrypting.
 func TestEncryptYieldsMsgpackWithVersionKey(t *testing.T) {
-	for _, version := range CryptVersions.Versions() {
+	for _, version := range CryptVersions.All() {
 		ciphertext, err := version.Encrypt(Data, "password")
 		assert.NoError(t, err)
 
@@ -56,7 +56,7 @@ func TestEncryptYieldsMsgpackWithVersionKey(t *testing.T) {
 // NOTE: this is necessary for pretty obvious reasons
 func TestEncryptAndDecryptAllVersions(t *testing.T) {
 	password := "password"
-	for _, version := range CryptVersions.Versions() {
+	for _, version := range CryptVersions.All() {
 		encrypted, err := version.Encrypt(Data, password)
 		assert.NoError(t, err)
 
@@ -75,7 +75,7 @@ func TestEncryptAndDecryptAllVersions(t *testing.T) {
 // which is basically necessary for this kind of application.
 func TestEncryptTwiceYieldsDifferentOutput(t *testing.T) {
 	password := "password"
-	for _, version := range CryptVersions.Versions() {
+	for _, version := range CryptVersions.All() {
 		encrypted1, err := version.Encrypt(Data, password)
 		assert.NoError(t, err)
 
@@ -100,7 +100,7 @@ func TestEncryptCompressesPlaintext(t *testing.T) {
 	size := 10000
 	repetitiousData := make([]byte, size)
 
-	for _, version := range CryptVersions.Versions() {
+	for _, version := range CryptVersions.All() {
 		encrypted, err := version.Encrypt(repetitiousData, "password")
 		assert.NoError(t, err)
 

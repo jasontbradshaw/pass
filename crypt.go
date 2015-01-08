@@ -220,7 +220,7 @@ func decryptAES256CFB(ciphertext []byte, iv aesIV, key aes256Key) ([]byte, error
 
 // encrypt some data using the given password and the latest encryption function
 func Encrypt(data []byte, password string) ([]byte, error) {
-	return CryptVersions.LatestVersion().Encrypt(data, password)
+	return CryptVersions.Latest().Encrypt(data, password)
 }
 
 // decrypt some data using the given password
@@ -262,7 +262,7 @@ func Decrypt(data []byte, password string) ([]byte, error) {
 	versionNumber := cryptVersionNumber(versionNumberLarge)
 
 	// decrypt based on the indicated version
-	cryptRecord, ok := CryptVersions.FindVersion(versionNumber)
+	cryptRecord, ok := CryptVersions.Find(versionNumber)
 	if !ok {
 		return nil, fmt.Errorf("Unable to read file of version %d", versionNumber)
 	}
