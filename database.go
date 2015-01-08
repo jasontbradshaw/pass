@@ -27,27 +27,19 @@ import ()
 {
   // the current version of the database format, as an integer. this is
   // incremented every time the format changes, so that migrations may be done.
-  "version": 0,
+  "Version": 0,
 
-  "settings": {
-    "clipboard_clear_delay_ms": 10000,
-    "database_lock_delay_ms": 30000
+  "Settings": {
+    "ClipboardClearDelayMS": 10000,
+    "DatabaseLockDelayMS": 30000,
   },
 
-  // these are encrypted with a password generated from the master password,
-  // that's _different_ from the one that unlocks the database at large. this
-  // lets us store it in memory when the user enters their password for the
-  // first time, then decrypt things only as-needed to prevent them from getting
-  // written to the swap area if memory swaps. the encryption/decryption of
-  // these blobs should be pretty much instantaneous. each entry is keyed by its
-  // UUID, which will allow us to easily access the data for a specific entry
-  // without having to do a linear search to find a specific one.
-  "entries": {
-    "uuid0": "encrypted:base64blob",
-    "uuid1": "encrypted:base64blob",
-    "uuid2": "encrypted:base64blob",
-    "uuid3": "encrypted:base64blob",
-    "uuid4": "encrypted:base64blob"
+  "Entries": {
+    "uuid0": {...},
+    "uuid1": {...},
+    "uuid2": {...},
+    "uuid3": {...},
+    "uuid4": {...},
   }
 }
 */
@@ -56,31 +48,28 @@ import ()
 /*
 {
   // a UUID for this entry
-  "id": "00000000-0000-0000-0000-000000000000",
+  "Id": "00000000-0000-0000-0000-000000000000",
 
   // ISO-8601 timestamps for each value
-  "created_at": "2014-12-20T14:42:30Z",
-  "updated_at": "2014-12-20T14:42:30Z",
-  "deleted_at": nil,
+  "CreatedAt": "2014-12-20T14:42:30Z",
+  "UpdatedAt": "2014-12-20T14:42:30Z",
+  "DeletedAt": nil,
 
   // standard data
-  "title": "Hacker News",
-  "url": "https://news.ycombinator.com",
-  "username": "pg",
-  "password": "sjf3489yrhlOFasdfklj44445",
-
-  // the ISO-8601 timestamp after which this entry is considered "expired"
-  "expires_at": "2014-12-20T14:42:30Z",
+  "Title": "Hacker News",
+  "URL": "https://news.ycombinator.com",
+  "Username": "pg",
+  "Password": "sjf3489yrhlOFasdfklj44445",
 
   // an array of GMail-like string tags, in sorted order, de-duplicated
-  "tags": []
+  "Tags": []
 
   // a map of arbitrary string key/value pairs the user can create and manage
-  "data": {},
+  "Data": {},
 
   // a wholesale copy of the previous version of the entry, made every time a
   // modification is saved.
-  "previous_version": {}
+  "PreviousVersion": {}
 }
 */
 
