@@ -50,6 +50,18 @@ func skipIfShort(t *testing.T) {
 	}
 }
 
+// just a smoke test to make sure msgpack encoding works, since this is almost
+// entirely delegated to a library.
+func TestEncodeMsgpackWorks(t *testing.T) {
+	enc, err := encodeMsgpack(map[string]int{
+		"foo": 1,
+	})
+	assert.NoError(t, err)
+
+	// fixmap of one item, fixstr of three characters, fixnum of 1
+	assert.Equal(t, enc, []byte{0x81, 0xa3, 0x66, 0x6f, 0x6f, 1})
+}
+
 // should be able to decompress the compressed empty array
 func TestDecompressGzipMinCompressed(t *testing.T) {
 	compressed, err := compressGzip(EmptyData)
