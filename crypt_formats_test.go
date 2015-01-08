@@ -28,7 +28,7 @@ func TestEncryptYieldsMsgpack(t *testing.T) {
 
 // the top-level encrypt function should always be using the latest version
 func TestEncryptUsesLatestVersion(t *testing.T) {
-
+	// TODO: build it
 }
 
 // each encrypted blob must be readable as a map that contains a "Version" key
@@ -96,7 +96,7 @@ func TestEncryptTwiceYieldsDifferentOutput(t *testing.T) {
 // out of the plaintext, "randomizing" it and making it more difficult to detect
 // what lies within.
 func TestEncryptCompressesPlaintext(t *testing.T) {
-	// lots of zeros should always compress very well
+	// lots of zeros should always compress very well size := 10000
 	size := 10000
 	repetitiousData := make([]byte, size)
 
@@ -106,5 +106,13 @@ func TestEncryptCompressesPlaintext(t *testing.T) {
 
 		// in this case, the encrypted data should be smaller
 		assert.True(t, len(encrypted) < size)
+	}
+}
+
+// no public version should have a nil function value
+func TestAllVersionsHaveNonNilFunctions(t *testing.T) {
+	for _, version := range CryptVersions.All() {
+		assert.NotNil(t, version.Encrypt)
+		assert.NotNil(t, version.Decrypt)
 	}
 }
