@@ -263,6 +263,88 @@ func TestHashFillScryptPopulateInOrder(t *testing.T) {
 	}
 }
 
+// the output of encryption should be ot the same length as the input
+func TestEncryptAES256CFBSameLengthAsInput(t *testing.T) {
+	for _, data := range AllData {
+		encrypted, err := encryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+		assert.Len(t, encrypted, len(data))
+	}
+}
+
+// the output of encryption should be different from the input (unless empty)
+func TestEncryptAES256CFBDifferentFromInput(t *testing.T) {
+	for _, data := range AllData {
+		encrypted, err := encryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+
+		if len(data) != 0 {
+			assert.NotEqual(t, encrypted, data)
+		}
+	}
+}
+
+// the output of encryption should be the same if the inputs are identical
+func TestEncryptAES256CFBConstantWithSameParameters(t *testing.T) {
+	for _, data := range AllData {
+		encrypted1, err := encryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+
+		encrypted2, err := encryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+
+		assert.Equal(t, encrypted1, encrypted2)
+	}
+}
+
+// the output of decryption should be ot the same length as the input
+func TestDecryptAES256CFBSameLengthAsInput(t *testing.T) {
+	for _, data := range AllData {
+		decrypted, err := decryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+
+		assert.Len(t, decrypted, len(data))
+	}
+}
+
+// the output of encryption should be the same if the inputs are identical
+func TestDecryptAES256CFBConstantWithSameParameters(t *testing.T) {
+	for _, data := range AllData {
+		decrypted1, err := encryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+
+		decrypted2, err := encryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+
+		assert.Equal(t, decrypted1, decrypted2)
+	}
+}
+
+// the output of decryption should be different from the input (unless empty)
+func TestDecryptAES256CFBDifferentFromInput(t *testing.T) {
+	for _, data := range AllData {
+		decrypted, err := decryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+
+		if len(data) != 0 {
+			assert.NotEqual(t, decrypted, data)
+		}
+	}
+}
+
+// the output of decryption should be the same as the original plaintext
+func TestEncryptAES256CFBAndDecryptAES256CFB(t *testing.T) {
+	for _, data := range AllData {
+		encrypted, err := encryptAES256CFB(data, iv, key)
+		assert.NoError(t, err)
+
+		decrypted, err := decryptAES256CFB(encrypted, iv, key)
+		assert.NoError(t, err)
+
+		assert.Equal(t, data, decrypted)
+	}
+}
+
 // make sure that encrypting the data is doing some sort of compression. we
 // supply it with a large amount of repetitious data, which any self-respecting
 // compression algorithm should reduce the size of with ease. the size of the
