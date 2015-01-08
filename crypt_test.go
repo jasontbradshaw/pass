@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/ugorji/go/codec"
 )
 
 // used for testing empty data
@@ -42,13 +43,6 @@ var _ int = copy(hmacKey[:], randomBytes)
 
 var salt salt128 = salt128{}
 var _ int = copy(salt[:], randomBytes)
-
-// skip the given test if running in short mode
-func skipIfShort(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping test in short mode")
-	}
-}
 
 // just a smoke test to make sure msgpack encoding works, since this is almost
 // entirely delegated to a library.
@@ -474,6 +468,20 @@ func TestDecryptEmptyPassword(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, plaintext, decrypted)
 	}
+}
+
+// make sure we get msgpack data back from encryption
+func TestEncryptYieldsMsgpack(t *testing.T) {
+	ciphertext, err := Encrypt(ShortData, "password")
+	assert.NoError(t, err)
+
+	var (
+		msgpack map[string]interface{}
+		mh      codec.MsgpackHandle
+	)
+	dec := codec.NewDecoderBytes(ciphertext, &mh)
+	err = dec.Decode(&msgpack)
+	assert.NoError(t, err)
 }
 
 // BENCHMARKS
