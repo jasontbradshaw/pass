@@ -11,6 +11,7 @@ import (
 var Data []byte = []byte("insert super important data here")
 
 // make sure we get msgpack data back from encryption
+// NOTE: this is a requirement of our top-level format
 func TestEncryptYieldsMsgpack(t *testing.T) {
 	for _, version := range CryptVersions.All() {
 		ciphertext, err := version.Encrypt(Data, "password")
@@ -28,7 +29,25 @@ func TestEncryptYieldsMsgpack(t *testing.T) {
 
 // the top-level encrypt function should always be using the latest version
 func TestEncryptUsesLatestVersion(t *testing.T) {
-	// TODO: build it
+	password := "password"
+
+	// encrypt with our top-level function
+	ciphertext, err := Encrypt(Data, password)
+	assert.NoError(t, err)
+
+	// the version should match the latest version
+	versionNumber, err := getBlobVersion(ciphertext)
+	assert.NoError(t, err)
+
+	// get the latest version and make sure that's what we got
+	latest := CryptVersions.Latest()
+	assert.Equal(t, latest.Version, versionNumber)
+
+	// for good measure, decryption with the latest version's decrypt function
+	// should work too.
+	plaintext, err := latest.Decrypt(ciphertext, password)
+	assert.NoError(t, err)
+	assert.Equal(t, Data, plaintext)
 }
 
 // each encrypted blob must be readable as a map that contains a "Version" key
