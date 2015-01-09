@@ -1,4 +1,4 @@
-package pass
+package database
 
 import ()
 
