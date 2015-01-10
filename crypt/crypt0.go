@@ -130,6 +130,8 @@ func decrypt0(signedMeta []byte, password string) ([]byte, error) {
 	}
 
 	// verify the signed data, the meta plus the signature header bytes
+	// NOTE: it's extremely important to verify the data before attempting to
+	// decrypt it! if we don't, this opens us up to padding oracle attacks!
 	sigStartIndex := len(signedMeta) - sha512.Size
 	err = verifySHA512(signedMeta[:sigStartIndex], hmacKey, signature)
 	if err != nil {

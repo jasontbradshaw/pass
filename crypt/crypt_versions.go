@@ -25,6 +25,14 @@ type cryptVersions struct {
 	versionsById map[cryptVersionNumber]*cryptVersionRecord
 }
 
+// expose the canonical list of available versions, as defined by their
+// respective files.
+// NOTE: we maintain this _here and only here_ to prevent modifying the version
+// database, which we want to be immutable for all intents and purposes.
+var CryptVersions cryptVersions = newCryptVersions(
+	cryptVersionRecord0,
+)
+
 // given a bunch of versions, builds the internal version list and populates the
 // lookup map.
 func newCryptVersions(records ...cryptVersionRecord) cryptVersions {
@@ -76,11 +84,3 @@ func (c *cryptVersions) Find(requestedVersion cryptVersionNumber) (cryptVersionR
 
 	return *record, true
 }
-
-// expose the canonical list of available versions, as defined by their
-// respective files.
-// NOTE: we maintain this _here and only here_ to prevent modifying the version
-// database, which we want to be immutable for all intents and purposes.
-var CryptVersions cryptVersions = newCryptVersions(
-	cryptVersionRecord0,
-)
