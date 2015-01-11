@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var reMidStringBigs *regexp.Regexp = regexp.MustCompile(`([A-Z]+)[A-Z][a-z]`)
+var reMidStringCaps *regexp.Regexp = regexp.MustCompile(`([A-Z]+)[A-Z][a-z]`)
 
 var digitStrings map[string]bool = map[string]bool{
 	"0": true, "1": true, "2": true, "3": true, "4": true,
@@ -16,7 +16,7 @@ var digitStrings map[string]bool = map[string]bool{
 // takes a camel-case or upper-camel-case string and converts it to snake_case.
 // converts intelligently around case transitions, so something like `camelCASE`
 // becomes `camel_case` and not `camel_c_a_s_e`. if the input string is not in
-// valid camel0case, the result is not guaranteed to be well-formed.
+// valid camel-case, the result is not guaranteed to be well-formed.
 func CamelCaseToSnakeCase(s string) string {
 	if len(s) == 0 {
 		return ""
@@ -24,9 +24,9 @@ func CamelCaseToSnakeCase(s string) string {
 
 	// pre-process the string to replace any min-string runs of all-caps with
 	// their title-cased equivalents. this lets us turn things like "FOOBar" and
-	// "bazFOOBar" into "foo_bar" and "baz_foo_bar".
+	// "bazFOOBar" into "foo_bar" and "baz_foo_bar" using the loop below.
 	san := s
-	groups := reMidStringBigs.FindAllStringSubmatch(san, -1)
+	groups := reMidStringCaps.FindAllStringSubmatch(san, -1)
 	for _, group := range groups {
 		match := group[1]
 		san = strings.Replace(san, match, strings.Title(strings.ToLower(match)), 1)
