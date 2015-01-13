@@ -47,3 +47,23 @@ func TestCamelCaseToSnakeCase(t *testing.T) {
 	assert.Equal(t, "foo_1_bar_1", CamelCaseToSnakeCase("foo1BAR1"))
 	assert.Equal(t, "foo_123_bar", CamelCaseToSnakeCase("FOO123BAR"))
 }
+
+func TestUUID4AdheresToSpec(t *testing.T) {
+	seen := make(map[[16]byte]bool)
+	size := 100000
+
+	for i := 0; i < size; i++ {
+		id := UUID4()
+
+		// must have the first four bits of the seventh byte set to 0100
+		assert.Equal(t, 0x40, id[6]&0xF0)
+
+		// must have the first two bits of the ninth byte set to 10
+		assert.Equal(t, 0x80, id[8]&0xC0)
+
+		// we should not see the same UUID twice!
+		_, ok := seen[id]
+		assert.False(t, ok)
+		seen[id] = true
+	}
+}
