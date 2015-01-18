@@ -2,7 +2,6 @@ package util
 
 import (
 	"bytes"
-	"crypto/rand"
 	"regexp"
 	"strings"
 )
@@ -13,8 +12,6 @@ var digitStrings map[string]bool = map[string]bool{
 	"0": true, "1": true, "2": true, "3": true, "4": true,
 	"5": true, "6": true, "7": true, "8": true, "9": true,
 }
-
-type UUID [16]byte
 
 // takes a camel-case or upper-camel-case string and converts it to snake_case.
 // converts intelligently around case transitions, so something like `camelCASE`
@@ -59,26 +56,4 @@ func CamelCaseToSnakeCase(s string) string {
 	}
 
 	return strings.ToLower(buf.String())
-}
-
-// generates and returns a new version 4 UUID as a byte array. panics if the
-// UUID fails to generate.
-func UUID4() UUID {
-	uuid := [16]byte{}
-
-	// fill our slice with random bytes
-	n, err := rand.Read(uuid[:])
-	if err != nil {
-		panic(err)
-	}
-	if n != len(uuid) {
-		panic("Not enough random bytes were generated to fill a UUID!")
-	}
-
-	// update the bytes to match the UUIDv4 spec (see:
-	// http://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_.28random.29).
-	uuid[6] = (uuid[6] & 0x0F) | 0x40
-	uuid[8] = (uuid[8] & 0x3F) | 0x80
-
-	return uuid
 }
