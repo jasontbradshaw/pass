@@ -5,18 +5,18 @@ import (
 	"testing"
 )
 
-// a global result for deoptimization and a bunch of random bytes
+// A global result for deoptimization and a bunch of random bytes.
 var deoptimizer interface{}
 var randomBytes = make([]byte, 512)
 var _, _ = rand.Read(randomBytes)
 
 // BENCHMARKS
 //
-// NOTE: these tests all store a result globally to prevent the compiler from
+// NOTE: These tests all store a result globally to prevent the compiler from
 // optimizing the benchmark function call away since its result isn't being
 // used.
 
-// benchmark password hashing using the defaults used internally
+// Benchmark password hashing using the defaults used internally.
 func BenchmarkHashPassword(b *testing.B) {
 	hashPasswordBenchmarkPassword := randomBytes[32:64]
 	var hashPasswordBenchmarkSalt salt128

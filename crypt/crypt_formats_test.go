@@ -7,11 +7,11 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-// some data we can play with
+// Some data we can play with.
 var Data []byte = []byte("insert super important data here")
 
-// make sure we get msgpack data back from encryption
-// NOTE: this is a requirement of our top-level format
+// Make sure we get msgpack data back from encryption.
+// NOTE: This is a requirement of our top-level format.
 func TestEncryptYieldsMsgpack(t *testing.T) {
 	for _, version := range CryptVersions.All() {
 		ciphertext, err := version.Encrypt(Data, "password")
@@ -27,31 +27,31 @@ func TestEncryptYieldsMsgpack(t *testing.T) {
 	}
 }
 
-// the top-level encrypt function should always be using the latest version
+// The top-level encrypt function should always be using the latest version.
 func TestEncryptUsesLatestVersion(t *testing.T) {
 	password := "password"
 
-	// encrypt with our top-level function
+	// Encrypt with our top-level function.
 	ciphertext, err := Encrypt(Data, password)
 	assert.NoError(t, err)
 
-	// the version should match the latest version
+	// The version should match the latest version.
 	versionNumber, err := getBlobVersion(ciphertext)
 	assert.NoError(t, err)
 
-	// get the latest version and make sure that's what we got
+	// Get the latest version and make sure that's what we got.
 	latest := CryptVersions.Latest()
 	assert.Equal(t, latest.Version, versionNumber)
 
-	// for good measure, decryption with the latest version's decrypt function
+	// For good measure, decryption with the latest version's decrypt function
 	// should work too.
 	plaintext, err := latest.Decrypt(ciphertext, password)
 	assert.NoError(t, err)
 	assert.Equal(t, Data, plaintext)
 }
 
-// each encrypted blob must be readable as a map that contains a "Version" key
-// NOTE: this is necessary so the top-level functions can delegate to a specific
+// Each encrypted blob must be readable as a map that contains a "Version" key.
+// NOTE: This is necessary so the top-level functions can delegate to a specific
 // algorithm when decrypting.
 func TestEncryptYieldsMsgpackWithVersionKey(t *testing.T) {
 	for _, version := range CryptVersions.All() {
@@ -71,8 +71,8 @@ func TestEncryptYieldsMsgpackWithVersionKey(t *testing.T) {
 	}
 }
 
-// each version should be able to encrypt and decrypt its own data
-// NOTE: this is necessary for pretty obvious reasons
+// Each version should be able to encrypt and decrypt its own data.
+// NOTE: This is necessary for pretty obvious reasons.
 func TestEncryptAndDecryptAllVersions(t *testing.T) {
 	password := "password"
 	for _, version := range CryptVersions.All() {
@@ -86,10 +86,10 @@ func TestEncryptAndDecryptAllVersions(t *testing.T) {
 	}
 }
 
-// each version should yield different data for two different encrypt calls on
+// Each version should yield different data for two different encrypt calls on
 // the same data.
-// NOTE: this preserves the "anonymity" of the data, since an attacker can't
-// tell reliably whether the data has been changed or just re-encrypted. this
+// NOTE: This preserves the "anonymity" of the data, since an attacker can't
+// tell reliably whether the data has been changed or just re-encrypted. This
 // also ensures that whatever encryption is being done is using a random salt,
 // which is basically necessary for this kind of application.
 func TestEncryptTwiceYieldsDifferentOutput(t *testing.T) {
@@ -105,17 +105,17 @@ func TestEncryptTwiceYieldsDifferentOutput(t *testing.T) {
 	}
 }
 
-// make sure that encrypting the data is doing some sort of compression. we
+// Make sure that encrypting the data is doing some sort of compression. We
 // supply it with a large amount of repetitious data, which any self-respecting
-// compression algorithm should reduce the size of with ease. the size of the
+// compression algorithm should reduce the size of with ease. The size of the
 // data should me much longer than the minimum encrypted length, in order to
 // ensure that the compression and encryption overhead is balanced out.
-// NOTE: this is necessary since compressing before encrypting can prevent
+// NOTE: This is necessary since compressing before encrypting can prevent
 // known-plaintext attacks, since compression is squeezing any low-entropy areas
 // out of the plaintext, "randomizing" it and making it more difficult to detect
 // what lies within.
 func TestEncryptCompressesPlaintext(t *testing.T) {
-	// lots of zeros should always compress very well size := 10000
+	// Lots of zeros should always compress very well!
 	size := 10000
 	repetitiousData := make([]byte, size)
 
@@ -123,12 +123,12 @@ func TestEncryptCompressesPlaintext(t *testing.T) {
 		encrypted, err := version.Encrypt(repetitiousData, "password")
 		assert.NoError(t, err)
 
-		// in this case, the encrypted data should be smaller
+		// In this case, the encrypted data should be smaller.
 		assert.True(t, len(encrypted) < size)
 	}
 }
 
-// no public version should have a nil function value
+// No public version should have a `nil` function value
 func TestAllVersionsHaveNonNilFunctions(t *testing.T) {
 	for _, version := range CryptVersions.All() {
 		assert.NotNil(t, version.Encrypt)

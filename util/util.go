@@ -13,17 +13,17 @@ var digitStrings map[string]bool = map[string]bool{
 	"5": true, "6": true, "7": true, "8": true, "9": true,
 }
 
-// takes a camel-case or upper-camel-case string and converts it to snake_case.
-// converts intelligently around case transitions, so something like `camelCASE`
-// becomes `camel_case` and not `camel_c_a_s_e`. if the input string is not in
+// Takes a camel-case or upper-camel-case string and converts it to snake_case.
+// Converts intelligently around case transitions, so something like `camelCASE`
+// becomes `camel_case` and not `camel_c_a_s_e`. If the input string is not in
 // valid camel-case, the result is not guaranteed to be well-formed.
 func CamelCaseToSnakeCase(s string) string {
 	if len(s) == 0 {
 		return ""
 	}
 
-	// pre-process the string to replace any min-string runs of all-caps with
-	// their title-cased equivalents. this lets us turn things like "FOOBar" and
+	// Pre-process the string to replace any mid-string runs of all-caps with
+	// their title-cased equivalents. This lets us turn things like "FOOBar" and
 	// "bazFOOBar" into "foo_bar" and "baz_foo_bar" using the loop below.
 	san := s
 	groups := reMidStringCaps.FindAllStringSubmatch(san, -1)
@@ -42,7 +42,7 @@ func CamelCaseToSnakeCase(s string) string {
 		isUpper := strings.ToUpper(c) == c
 		isDigit := digitStrings[c]
 
-		// if we've changed case, insert a divider
+		// If we've changed case, insert a divider.
 		if (isUpper && !lastWasUpper) ||
 			(isDigit && !lastWasDigit) ||
 			(isDigit != lastWasDigit) {
