@@ -15,6 +15,10 @@ var Data []byte = []byte("insert super important data here")
 // NOTE: This is a hard requirement since our top level format depends on this
 // data to route incoming blobs to the correct version for decryption.
 func TestEncryptYieldsRequiredMsgpackHeaderFormat(t *testing.T) {
+	// We make most of these parallel so they can run concurrently and take less
+	// real time.
+	t.Parallel()
+
 	for _, version := range CryptVersions.All() {
 		ciphertext, err := version.Encrypt("password", Data)
 		assert.NoError(t, err)
@@ -42,6 +46,8 @@ func TestEncryptYieldsRequiredMsgpackHeaderFormat(t *testing.T) {
 
 // The top-level encrypt function should always be using the latest version.
 func TestEncryptUsesLatestVersion(t *testing.T) {
+	t.Parallel()
+
 	password := "password"
 
 	// Encrypt with our top-level function.
@@ -65,6 +71,8 @@ func TestEncryptUsesLatestVersion(t *testing.T) {
 
 // Each version should be able to encrypt and decrypt its own data.
 func TestEncryptAndDecryptAllVersions(t *testing.T) {
+	t.Parallel()
+
 	password := "password"
 	for _, version := range CryptVersions.All() {
 		encrypted, err := version.Encrypt(password, Data)
@@ -85,6 +93,8 @@ func TestEncryptAndDecryptAllVersions(t *testing.T) {
 // using a random salt, which is basically necessary for this kind of
 // application.
 func TestEncryptTwiceYieldsDifferentOutput(t *testing.T) {
+	t.Parallel()
+
 	password := "password"
 	for _, version := range CryptVersions.All() {
 		encrypted1, err := version.Encrypt(password, Data)
@@ -107,6 +117,8 @@ func TestEncryptTwiceYieldsDifferentOutput(t *testing.T) {
 // out of the plaintext, "randomizing" it and making it more difficult to detect
 // what lies within.
 func TestEncryptCompressesPlaintext(t *testing.T) {
+	t.Parallel()
+
 	// Lots of zeros should always compress very well!
 	size := 10000
 	repetitiousData := make([]byte, size)

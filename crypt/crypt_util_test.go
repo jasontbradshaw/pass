@@ -70,6 +70,10 @@ func TestCompressGZipAndDecompressGZip(t *testing.T) {
 
 // Make sure we got the requested number of bytes out of the hash function.
 func TestHashScryptCorrectSize(t *testing.T) {
+	// We make most of these parallel so they can run concurrently and take less
+	// real time.
+	t.Parallel()
+
 	for _, data := range AllData {
 		size := 30
 
@@ -81,6 +85,8 @@ func TestHashScryptCorrectSize(t *testing.T) {
 
 // This should dutifully provide us an empty byte array.
 func TestHashScryptZeroSize(t *testing.T) {
+	t.Parallel()
+
 	for _, data := range AllData {
 		data, err := hashScrypt(data, salt, 16, 2, 1, 0)
 		assert.Len(t, data, 0)
@@ -89,6 +95,8 @@ func TestHashScryptZeroSize(t *testing.T) {
 }
 
 func TestHashScryptOneSize(t *testing.T) {
+	t.Parallel()
+
 	for _, data := range AllData {
 		data, err := hashScrypt(data, salt, 16, 2, 1, 1)
 		assert.Len(t, data, 1)
@@ -97,6 +105,8 @@ func TestHashScryptOneSize(t *testing.T) {
 }
 
 func TestHashScryptTwoSize(t *testing.T) {
+	t.Parallel()
+
 	for _, data := range AllData {
 		data, err := hashScrypt(data, salt, 16, 2, 1, 2)
 		assert.Len(t, data, 2)
@@ -106,6 +116,8 @@ func TestHashScryptTwoSize(t *testing.T) {
 
 // Make sure we're not just getting null bytes.
 func TestHashScryptNonNull(t *testing.T) {
+	t.Parallel()
+
 	for _, data := range AllData {
 		size := 30
 
@@ -165,6 +177,8 @@ func TestHashScryptZeroP(t *testing.T) {
 // We don't need to re-test everything else since this function should be
 // delegating to the "plain" `hash` function.
 func TestHashFillScryptPopulateInOrder(t *testing.T) {
+	t.Parallel()
+
 	for _, data := range AllData {
 		var (
 			size = 30

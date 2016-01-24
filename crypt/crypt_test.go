@@ -10,6 +10,10 @@ import (
 // Make sure we get the original data back after we encrypt and decrypt it with
 // the top-level public functions.
 func TestEncryptAndDecrypt(t *testing.T) {
+	// We make most of these parallel so they can run concurrently and take less
+	// real time.
+	t.Parallel()
+
 	password := "password"
 	for _, plaintext := range AllData {
 		encrypted, err := Encrypt(password, plaintext)
@@ -24,12 +28,16 @@ func TestEncryptAndDecrypt(t *testing.T) {
 
 // Attempting to decrypt an empty blob should fail.
 func TestDecryptEmptyDataFails(t *testing.T) {
+	t.Parallel()
+
 	_, err := Decrypt("password", make([]byte, 0))
 	assert.Error(t, err)
 }
 
 // Attempting to decrypt an empty blob with an empty password should fail.
 func TestDecryptEmptyDataEmptyPasswordFails(t *testing.T) {
+	t.Parallel()
+
 	_, err := Decrypt("", make([]byte, 0))
 	assert.Error(t, err)
 }
@@ -37,6 +45,8 @@ func TestDecryptEmptyDataEmptyPasswordFails(t *testing.T) {
 // Attempting to decrypt a blob with an empty password (when the original
 // password wasn't empty) should fail.
 func TestDecryptEmptyPasswordFails(t *testing.T) {
+	t.Parallel()
+
 	password := "password"
 	for _, plaintext := range AllData {
 		encrypted, err := Encrypt(password, plaintext)
@@ -49,6 +59,8 @@ func TestDecryptEmptyPasswordFails(t *testing.T) {
 
 // Attempting to decrypt a blob with the wrong password should fail.
 func TestDecryptWrongPasswordFails(t *testing.T) {
+	t.Parallel()
+
 	password := "password"
 	for _, plaintext := range AllData {
 		encrypted, err := Encrypt(password, plaintext)
@@ -61,6 +73,8 @@ func TestDecryptWrongPasswordFails(t *testing.T) {
 
 // Attempting to decrypt a blob that has had any one byte modified should fail.
 func TestDecryptModifiedBlobFails(t *testing.T) {
+	t.Parallel()
+
 	password := "password"
 
 	for _, plaintext := range AllData {
@@ -93,6 +107,8 @@ func TestDecryptModifiedBlobFails(t *testing.T) {
 
 // Decrypting a blob protected with an empty password should work.
 func TestDecryptEmptyPassword(t *testing.T) {
+	t.Parallel()
+
 	password := ""
 	for _, plaintext := range AllData {
 		encrypted, err := Encrypt(password, plaintext)
