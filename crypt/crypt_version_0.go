@@ -52,7 +52,7 @@ func encrypt0(password string, plaintext []byte) ([]byte, error) {
 	// Compression maximizes its entropy prior to encryption, ensuring that we're
 	// encrypting the most random-looking thing possible and hardening against
 	// known-plaintext attacks (see http://superuser.com/a/257802).
-	compressedPlaintext, err := compressGZip(plaintext)
+	compressedPlaintext, err := compressLZ4(plaintext)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +257,7 @@ func decrypt0(password string, blob []byte) ([]byte, error) {
 	}
 
 	// Decompress the compressed plaintext.
-	plaintext, err := decompressGZip(compressedPlaintext)
+	plaintext, err := decompressLZ4(compressedPlaintext)
 	if err != nil {
 		return nil, err
 	}

@@ -20,51 +20,51 @@ func TestEncodeMsgpackWorks(t *testing.T) {
 }
 
 // Should be able to decompress the compressed empty array.
-func TestDecompressGZipMinCompressed(t *testing.T) {
-	compressed, err := compressGZip(EmptyData)
+func TestDecompressLZ4MinCompressed(t *testing.T) {
+	compressed, err := compressLZ4(EmptyData)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, compressed)
+
+	decompressed, err := decompressLZ4(compressed)
 	assert.NoError(t, err)
 
-	decompressed, err := decompressGZip(compressed)
-	assert.NoError(t, err)
-
-	assert.Equal(t, decompressed, EmptyData)
+	assert.Equal(t, EmptyData, decompressed)
 }
 
-func TestDecompressGZipTooShort(t *testing.T) {
-	minCompressed, err := compressGZip([]byte{})
+func TestDecompressLZ4TooShort(t *testing.T) {
+	minCompressed, err := compressLZ4([]byte{})
 	assert.NoError(t, err)
-
-	minCompressedLength := len(minCompressed)
+	assert.NotEmpty(t, minCompressed)
 
 	// Check all possible sizes below the minimum compressed length to ensure that
 	// they error.
 	for size := len(minCompressed) - 1; size >= 0; size-- {
-		_, err := decompressGZip(make([]byte, minCompressedLength))
+		_, err := decompressLZ4(make([]byte, size))
 		assert.Error(t, err)
 	}
 }
 
 // Decompressing invalid data should fail.
-func TestDecompressGZipInvalid(t *testing.T) {
+func TestDecompressLZ4Invalid(t *testing.T) {
 	// Null data is certainly invalid.
 	data := make([]byte, 50)
 
-	_, err := decompressGZip(data)
+	_, err := decompressLZ4(data)
 	assert.Error(t, err)
 }
 
 // Compression and decompression are inverse operations, and therefore passing
 // input through the compressor and then the decompressor should yield the input
 // data once again.
-func TestCompressGZipAndDecompressGZip(t *testing.T) {
+func TestCompressLZ4AndDecompressLZ4(t *testing.T) {
 	for _, data := range AllData {
-		compressed, err := compressGZip(data)
+		compressed, err := compressLZ4(data)
 		assert.NoError(t, err)
 
-		decompressed, err := decompressGZip(compressed)
+		decompressed, err := decompressLZ4(compressed)
 		assert.NoError(t, err)
 
-		assert.Equal(t, decompressed, data)
+		assert.Equal(t, data, decompressed)
 	}
 }
 

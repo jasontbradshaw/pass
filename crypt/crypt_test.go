@@ -72,6 +72,11 @@ func TestDecryptWrongPasswordFails(t *testing.T) {
 }
 
 // Attempting to decrypt a blob that has had any one byte modified should fail.
+// TODO: This test takes a _very_ long time to complete. Instead of running each
+// encryption/decryption sequentially, we should be running them all in parallel
+// to make things progress as quickly as possible. This also applies to all the
+// other tests in this file, which should really be running all the tests on the
+// data they're given in parallel as well, even if not so much as this one is.
 func TestDecryptModifiedBlobFails(t *testing.T) {
 	t.Parallel()
 

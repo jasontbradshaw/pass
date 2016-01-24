@@ -2,10 +2,9 @@ package crypt
 
 import (
 	"bytes"
-	"compress/gzip"
 	"fmt"
-	"io/ioutil"
 
+	"github.com/pierrec/lz4"
 	"golang.org/x/crypto/scrypt"
 	"github.com/ugorji/go/codec"
 )
@@ -45,39 +44,53 @@ func encodeMsgpack(thingPointer interface{}) ([]byte, error) {
 	return out, nil
 }
 
-// Compress some data using the GZip algorithm and return it. We use the "best
-// speed" version since we want this to be reasonably fast, but still compress
-// the data to obfuscate it well and reduce payload size.
-func compressGZip(data []byte) ([]byte, error) {
+// Compress some data using the LZ4 algorithm and return it. LZ4 is _blazing
+// fast_ at both compression and decompression, which is good in case the user
+// has a lot of data in their blob.
+func compressLZ4(data []byte) ([]byte, error) {
 	compressed := new(bytes.Buffer)
-	writer, err := gzip.NewWriterLevel(compressed, gzip.BestSpeed)
-	if err != nil {
-		return nil, err
-	}
+	decompressed := bytes.NewBuffer(data)
 
 	// Compress our data.
-	writer.Write(data)
-	writer.Close()
+	writer := lz4.NewWriter(compressed)
+	_, err := writer.ReadFrom(decompressed)
+	if err != nil {
+		return nil, err
+	}
 
-	return compressed.Bytes(), nil
+	// When the library decompresses the empty string, instead of returning an
+	// empty byte array, it returns `nil`. We correct that here.
+	out := compressed.Bytes()
+	if out == nil {
+		out = []byte{}
+	}
+
+	return out, nil
 }
 
-// Decompress some data compressed by the GZip algorithm.
-func decompressGZip(data []byte) ([]byte, error) {
-	b := bytes.NewBuffer(data)
-	reader, err := gzip.NewReader(b)
+// Decompress some data compressed by the LZ4 algorithm.
+func decompressLZ4(data []byte) ([]byte, error) {
+	// If we were given empty data, error. The library simply returns `nil` in
+	// this case, so we correct that here.
+	if data == nil || len(data) == 0 {
+		return nil, fmt.Errorf("Cannot decompress empty data")
+	}
+
+	compressed := bytes.NewBuffer(data)
+	decompressed := new(bytes.Buffer)
+
+	reader := lz4.NewReader(compressed)
+	_, err := reader.WriteTo(decompressed)
 	if err != nil {
 		return nil, err
 	}
 
-	// Decompress our data.
-	result, err := ioutil.ReadAll(reader)
-	if err != nil {
-		return nil, err
+	out := decompressed.Bytes()
+	if out == nil {
+		out = []byte{}
 	}
-	reader.Close()
 
-	return result, nil
+	return out, nil
 }
 
 // Given some bytes, a salt, and some scrypt params, return a byte slice with

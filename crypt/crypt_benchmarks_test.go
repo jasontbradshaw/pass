@@ -35,18 +35,18 @@ func BenchmarkHashPassword(b *testing.B) {
 	}
 }
 
-func BenchmarkCompressGZip(b *testing.B) {
+func BenchmarkCompressLZ4(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = compressGZip(randomBytes)
+		deoptimizer, _ = compressLZ4(randomBytes)
 	}
 }
 
-func BenchmarkDecompressGZip(b *testing.B) {
-	decompressBenchmarkData, _ := compressGZip(randomBytes)
+func BenchmarkDecompressLZ4(b *testing.B) {
+	decompressBenchmarkData, _ := compressLZ4(randomBytes)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = decompressGZip(decompressBenchmarkData)
+		deoptimizer, _ = decompressLZ4(decompressBenchmarkData)
 	}
 }
 
