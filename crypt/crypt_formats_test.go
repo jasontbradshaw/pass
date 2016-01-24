@@ -10,20 +10,33 @@ import (
 // Some data we can play with.
 var Data []byte = []byte("insert super important data here")
 
-// Make sure we get msgpack data back from encryption.
-// NOTE: This is a requirement of our top-level format.
-func TestEncryptYieldsMsgpack(t *testing.T) {
+// Ensure all encryption version include the required msgpack header data: some
+// magic bytes followed by their matching version number.
+// NOTE: This is a hard requirement since our top level format depends on this
+// data to route incoming blobs to the correct version for decryption.
+func TestEncryptYieldsRequiredMsgpackHeaderFormat(t *testing.T) {
 	for _, version := range CryptVersions.All() {
-		ciphertext, err := version.Encrypt(Data, "password")
+		ciphertext, err := version.Encrypt("password", Data)
 		assert.NoError(t, err)
 
 		var (
-			msgpack map[string]interface{}
-			mh      codec.MsgpackHandle
+			decodedFormat  formatBytes
+			decodedVersion cryptVersionNumber
+			mh             codec.MsgpackHandle
 		)
 		dec := codec.NewDecoderBytes(ciphertext, &mh)
-		err = dec.Decode(&msgpack)
+
+		err = dec.Decode(&decodedFormat)
 		assert.NoError(t, err)
+
+		err = dec.Decode(&decodedVersion)
+		assert.NoError(t, err)
+
+		// Ensure the format we get back is correct.
+		assert.Equal(t, magicFormatBytes, decodedFormat)
+
+		// Ensure we got the correct version back as well.
+		assert.Equal(t, version.Version, decodedVersion)
 	}
 }
 
@@ -32,11 +45,11 @@ func TestEncryptUsesLatestVersion(t *testing.T) {
 	password := "password"
 
 	// Encrypt with our top-level function.
-	ciphertext, err := Encrypt(Data, password)
+	ciphertext, err := Encrypt(password, Data)
 	assert.NoError(t, err)
 
 	// The version should match the latest version.
-	versionNumber, err := getBlobVersion(ciphertext)
+	versionNumber, err := parseBlobVersionBytes(ciphertext)
 	assert.NoError(t, err)
 
 	// Get the latest version and make sure that's what we got.
@@ -45,41 +58,19 @@ func TestEncryptUsesLatestVersion(t *testing.T) {
 
 	// For good measure, decryption with the latest version's decrypt function
 	// should work too.
-	plaintext, err := latest.Decrypt(ciphertext, password)
+	plaintext, err := latest.Decrypt(password, ciphertext)
 	assert.NoError(t, err)
 	assert.Equal(t, Data, plaintext)
 }
 
-// Each encrypted blob must be readable as a map that contains a "Version" key.
-// NOTE: This is necessary so the top-level functions can delegate to a specific
-// algorithm when decrypting.
-func TestEncryptYieldsMsgpackWithVersionKey(t *testing.T) {
-	for _, version := range CryptVersions.All() {
-		ciphertext, err := version.Encrypt(Data, "password")
-		assert.NoError(t, err)
-
-		var (
-			msgpack map[string]interface{}
-			mh      codec.MsgpackHandle
-		)
-		dec := codec.NewDecoderBytes(ciphertext, &mh)
-		err = dec.Decode(&msgpack)
-		assert.NoError(t, err)
-
-		_, ok := msgpack["Version"]
-		assert.True(t, ok)
-	}
-}
-
 // Each version should be able to encrypt and decrypt its own data.
-// NOTE: This is necessary for pretty obvious reasons.
 func TestEncryptAndDecryptAllVersions(t *testing.T) {
 	password := "password"
 	for _, version := range CryptVersions.All() {
-		encrypted, err := version.Encrypt(Data, password)
+		encrypted, err := version.Encrypt(password, Data)
 		assert.NoError(t, err)
 
-		decrypted, err := version.Decrypt(encrypted, password)
+		decrypted, err := version.Decrypt(password, encrypted)
 		assert.NoError(t, err)
 
 		assert.Equal(t, Data, decrypted)
@@ -88,17 +79,18 @@ func TestEncryptAndDecryptAllVersions(t *testing.T) {
 
 // Each version should yield different data for two different encrypt calls on
 // the same data.
-// NOTE: This preserves the "anonymity" of the data, since an attacker can't
-// tell reliably whether the data has been changed or just re-encrypted. This
-// also ensures that whatever encryption is being done is using a random salt,
-// which is basically necessary for this kind of application.
+// NOTE: This ensures we're preserving the "anonymity" of the data, since an
+// attacker can't tell reliably whether the data has been changed or just
+// re-encrypted. This also ensures that whatever encryption is being done is
+// using a random salt, which is basically necessary for this kind of
+// application.
 func TestEncryptTwiceYieldsDifferentOutput(t *testing.T) {
 	password := "password"
 	for _, version := range CryptVersions.All() {
-		encrypted1, err := version.Encrypt(Data, password)
+		encrypted1, err := version.Encrypt(password, Data)
 		assert.NoError(t, err)
 
-		encrypted2, err := version.Encrypt(Data, password)
+		encrypted2, err := version.Encrypt(password, Data)
 		assert.NoError(t, err)
 
 		assert.NotEqual(t, encrypted1, encrypted2)
@@ -120,18 +112,10 @@ func TestEncryptCompressesPlaintext(t *testing.T) {
 	repetitiousData := make([]byte, size)
 
 	for _, version := range CryptVersions.All() {
-		encrypted, err := version.Encrypt(repetitiousData, "password")
+		encrypted, err := version.Encrypt("password", repetitiousData)
 		assert.NoError(t, err)
 
 		// In this case, the encrypted data should be smaller.
 		assert.True(t, len(encrypted) < size)
-	}
-}
-
-// No public version should have a `nil` function value
-func TestAllVersionsHaveNonNilFunctions(t *testing.T) {
-	for _, version := range CryptVersions.All() {
-		assert.NotNil(t, version.Encrypt)
-		assert.NotNil(t, version.Decrypt)
 	}
 }

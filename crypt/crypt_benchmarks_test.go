@@ -35,47 +35,32 @@ func BenchmarkHashPassword(b *testing.B) {
 	}
 }
 
-func BenchmarkCompress(b *testing.B) {
+func BenchmarkCompressGZip(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = compressGzip(randomBytes)
+		deoptimizer, _ = compressGZip(randomBytes)
 	}
 }
 
-func BenchmarkDecompress(b *testing.B) {
-	decompressBenchmarkData, _ := compressGzip(randomBytes)
+func BenchmarkDecompressGZip(b *testing.B) {
+	decompressBenchmarkData, _ := compressGZip(randomBytes)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = decompressGzip(decompressBenchmarkData)
-	}
-}
-
-func BenchmarkSign(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = signSHA512(randomBytes, hmacKey)
-	}
-}
-
-func BenchmarkVerify(b *testing.B) {
-	benchmarkDataSignature, _ := signSHA512(randomBytes, hmacKey)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		deoptimizer = verifySHA512(randomBytes, hmacKey, benchmarkDataSignature)
+		deoptimizer, _ = decompressGZip(decompressBenchmarkData)
 	}
 }
 
 func BenchmarkEncrypt(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = Encrypt(randomBytes, "password")
+		deoptimizer, _ = Encrypt("password", randomBytes)
 	}
 }
 
 func BenchmarkDecrypt(b *testing.B) {
-	encryptedData, _ := Encrypt(randomBytes, "password")
+	encryptedData, _ := Encrypt("password", randomBytes)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		deoptimizer, _ = Decrypt(encryptedData, "password")
+		deoptimizer, _ = Decrypt("password", encryptedData)
 	}
 }

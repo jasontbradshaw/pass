@@ -150,3 +150,10 @@ func TestCryptVersionsShouldContainVersionRecords(t *testing.T) {
 	assert.NotNil(t, CryptVersions)
 	assert.True(t, len(CryptVersions.All()) > 0)
 }
+
+func TestCryptVersionsShouldHaveNonNilFunctionValues(t *testing.T) {
+	for _, version := range CryptVersions.All() {
+		assert.NotNil(t, version.Encrypt)
+		assert.NotNil(t, version.Decrypt)
+	}
+}

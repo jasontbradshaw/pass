@@ -1,362 +1,21 @@
 package crypt
 
 import (
-	"crypto/rand"
-	"regexp"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
-
-// Used for testing empty data.
-var EmptyData []byte = []byte("")
-var SingleData []byte = []byte("a")
-var DoubleData []byte = []byte("ab")
-var ShortData []byte = []byte("abcdefghijklmnopqrstuvwxyz")
-var LongData []byte = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-var UnicodeData []byte = []byte("a®Ďƃɕʶ ̂ΆԃЌԵﬗאر݃ݓޤ‎߅ࡄখஷഖคබໄ၇ꩦႦᄓᎄⷄꬓᏄᑖᣆᚅᛕᜅᜤᝄᝣ‴№⁷✚z")
-
-var AllData [][]byte = [][]byte{
-	EmptyData,
-	SingleData,
-	DoubleData,
-	ShortData,
-	LongData,
-	UnicodeData,
-}
-
-// A bunch of random bytes for whatever.
-var _, _ = rand.Read(randomBytes)
-
-// Fill some arbitrary bits with random data.
-var key aes256Key = aes256Key{}
-var _ int = copy(key[:], randomBytes)
-
-var iv aesIV = aesIV{}
-var _ int = copy(iv[:], randomBytes)
-
-var hmacKey sha512Key = sha512Key{}
-var _ int = copy(hmacKey[:], randomBytes)
-
-var salt salt128 = salt128{}
-var _ int = copy(salt[:], randomBytes)
-
-// Just a smoke test to make sure msgpack encoding works, since this is almost
-// entirely delegated to a library.
-func TestEncodeMsgpackWorks(t *testing.T) {
-	enc, err := encodeMsgpack(map[string]int{
-		"foo": 1,
-	})
-	assert.NoError(t, err)
-
-	// `fixmap` of one item, `fixstr` of three characters, `fixnum` of 1.
-	assert.Equal(t, enc, []byte{0x81, 0xa3, 0x66, 0x6f, 0x6f, 1})
-}
-
-// Should be able to decompress the compressed empty array.
-func TestDecompressGzipMinCompressed(t *testing.T) {
-	compressed, err := compressGzip(EmptyData)
-	assert.NoError(t, err)
-
-	decompressed, err := decompressGzip(compressed)
-	assert.NoError(t, err)
-
-	assert.Equal(t, decompressed, EmptyData)
-}
-
-func TestDecompressGzipTooShort(t *testing.T) {
-	minCompressed, err := compressGzip([]byte{})
-	assert.NoError(t, err)
-
-	minCompressedLength := len(minCompressed)
-
-	// Check all possible sizes below the minimum compressed length to ensure that
-	// they error.
-	for size := len(minCompressed) - 1; size >= 0; size-- {
-		_, err := decompressGzip(make([]byte, minCompressedLength))
-		assert.Error(t, err)
-	}
-}
-
-// Decompressing invalid data should fail.
-func TestDecompressGzipInvalid(t *testing.T) {
-	// Null data is certainly invalid.
-	data := make([]byte, 50)
-
-	_, err := decompressGzip(data)
-	assert.Error(t, err)
-}
-
-// Compression and decompression are inverse operations, and therefore passing
-// input through the compressor and then the decompressor should yield the input
-// data once again.
-func TestCompressGzipAndDecompressGzip(t *testing.T) {
-	for _, data := range AllData {
-		compressed, err := compressGzip(data)
-		assert.NoError(t, err)
-
-		decompressed, err := decompressGzip(compressed)
-		assert.NoError(t, err)
-
-		assert.Equal(t, decompressed, data)
-	}
-}
-
-// Make sure that signing identical (but distinct) blocks of bytes always
-// produces the same signature.
-func TestSignSHA512Identical(t *testing.T) {
-	for _, data := range AllData {
-		copiedData := make([]byte, len(data))
-		copy(copiedData, data)
-
-		signature1, err := signSHA512(data, hmacKey)
-		assert.NoError(t, err)
-
-		signature2, err := signSHA512(copiedData, hmacKey)
-		assert.NoError(t, err)
-
-		assert.Equal(t, signature1, signature2)
-	}
-}
-
-// Data with an invalid signature shouldn't verify.
-func TestVerifySHA512InvalidSignature(t *testing.T) {
-	for _, data := range AllData {
-		// Create a signature of random bytes.
-		invalidSignature := sha512Signature{}
-		_, err := rand.Read(invalidSignature[:])
-		assert.NoError(t, err)
-
-		err = verifySHA512(data, hmacKey, invalidSignature)
-		assert.Error(t, err)
-	}
-}
-
-// Signing and verifying data should work.
-func TestSignSHA512AndVerifySHA512(t *testing.T) {
-	for _, data := range AllData {
-		signature, err := signSHA512(data, hmacKey)
-		assert.NoError(t, err)
-
-		err = verifySHA512(data, hmacKey, signature)
-		assert.NoError(t, err)
-	}
-}
-
-// Make sure we got the requested number of bytes out of the hash function.
-func TestHashScryptCorrectSize(t *testing.T) {
-	for _, data := range AllData {
-		size := 30
-
-		data, err := hashScrypt(data, salt, 16, 2, 1, size)
-		assert.Len(t, data, size)
-		assert.NoError(t, err)
-	}
-}
-
-// This should dutifully provide us an empty byte array.
-func TestHashScryptZeroSize(t *testing.T) {
-	for _, data := range AllData {
-		data, err := hashScrypt(data, salt, 16, 2, 1, 0)
-		assert.Len(t, data, 0)
-		assert.NoError(t, err)
-	}
-}
-
-func TestHashScryptOneSize(t *testing.T) {
-	for _, data := range AllData {
-		data, err := hashScrypt(data, salt, 16, 2, 1, 1)
-		assert.Len(t, data, 1)
-		assert.NoError(t, err)
-	}
-}
-
-func TestHashScryptTwoSize(t *testing.T) {
-	for _, data := range AllData {
-		data, err := hashScrypt(data, salt, 16, 2, 1, 2)
-		assert.Len(t, data, 2)
-		assert.NoError(t, err)
-	}
-}
-
-// Make sure we're not just getting null bytes.
-func TestHashScryptNonNull(t *testing.T) {
-	for _, data := range AllData {
-		size := 30
-
-		data, err := hashScrypt(data, salt, 16, 2, 1, size)
-		assert.NotEqual(t, make([]byte, size), data)
-		assert.NoError(t, err)
-	}
-}
-
-// Shouldn't accept an `N` value that's not a power of two.
-func TestHashScryptNonPowerOfTwoN(t *testing.T) {
-	for _, data := range AllData {
-		_, err := hashScrypt(data, salt, 15, 2, 1, 1)
-		assert.Error(t, err)
-		assert.Regexp(t, regexp.MustCompile(`\bN\b`), err.Error())
-	}
-}
-
-// Shouldn't accept an `N` value that's zero.
-func TestHashScryptZeroN(t *testing.T) {
-	for _, data := range AllData {
-		_, err := hashScrypt(data, salt, 0, 2, 1, 1)
-		assert.Error(t, err)
-		assert.Regexp(t, regexp.MustCompile(`\bN\b`), err.Error())
-	}
-}
-
-// Shouldn't accept an `N` value that's one.
-func TestHashScryptOneN(t *testing.T) {
-	for _, data := range AllData {
-		_, err := hashScrypt(data, salt, 1, 2, 1, 1)
-		assert.Error(t, err)
-		assert.Regexp(t, regexp.MustCompile(`\bN\b`), err.Error())
-	}
-}
-
-// Shouldn't accept an `r` value that's zero.
-func TestHashScryptZeroR(t *testing.T) {
-	for _, data := range AllData {
-		_, err := hashScrypt(data, salt, 16, 0, 1, 1)
-		assert.Error(t, err)
-		assert.Regexp(t, regexp.MustCompile(`\br\b`), err.Error())
-	}
-}
-
-// Shouldn't accept a `p` value that's zero.
-func TestHashScryptZeroP(t *testing.T) {
-	for _, data := range AllData {
-		_, err := hashScrypt(data, salt, 16, 2, 0, 1)
-		assert.Error(t, err)
-		assert.Regexp(t, regexp.MustCompile(`\bp\b`), err.Error())
-	}
-}
-
-// The given byte slices should be populated in the order they're specified,
-// with the bytes filling them in the same order the bytes have been generated.
-// We don't need to re-test everything else since this function should be
-// delegating to the "plain" `hash` function.
-func TestHashFillScryptPopulateInOrder(t *testing.T) {
-	for _, data := range AllData {
-		var (
-			size = 30
-			N    = scryptN(16)
-			r    = scryptR(2)
-			p    = scryptP(1)
-		)
-
-		// Get the original bytes.
-		hashed, err := hashScrypt(data, salt, N, r, p, size)
-		assert.NoError(t, err)
-
-		// Make some slices from a single array, for easy comparison later.
-		parts := make([]byte, size)
-		part1 := parts[:12]
-		part2 := parts[12:]
-
-		// Fill the slices with the hashed bytes.
-		hashFillScrypt(data, salt, N, r, p, part1, part2)
-
-		// Ensure they were filled in the correct order with the same bytes
-		// generated by the "plain" function.
-		assert.Equal(t, hashed, parts)
-	}
-}
-
-// The output of encryption should be ot the same length as the input.
-func TestEncryptAES256CFBSameLengthAsInput(t *testing.T) {
-	for _, data := range AllData {
-		encrypted, err := encryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-		assert.Len(t, encrypted, len(data))
-	}
-}
-
-// The output of encryption should be different from the input (unless empty).
-func TestEncryptAES256CFBDifferentFromInput(t *testing.T) {
-	for _, data := range AllData {
-		encrypted, err := encryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-
-		if len(data) != 0 {
-			assert.NotEqual(t, encrypted, data)
-		}
-	}
-}
-
-// The output of encryption should be the same if the inputs are identical.
-func TestEncryptAES256CFBConstantWithSameParameters(t *testing.T) {
-	for _, data := range AllData {
-		encrypted1, err := encryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-
-		encrypted2, err := encryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-
-		assert.Equal(t, encrypted1, encrypted2)
-	}
-}
-
-// The output of decryption should be ot the same length as the input.
-func TestDecryptAES256CFBSameLengthAsInput(t *testing.T) {
-	for _, data := range AllData {
-		decrypted, err := decryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-
-		assert.Len(t, decrypted, len(data))
-	}
-}
-
-// The output of encryption should be the same if the inputs are identical.
-func TestDecryptAES256CFBConstantWithSameParameters(t *testing.T) {
-	for _, data := range AllData {
-		decrypted1, err := encryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-
-		decrypted2, err := encryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-
-		assert.Equal(t, decrypted1, decrypted2)
-	}
-}
-
-// The output of decryption should be different from the input (unless empty).
-func TestDecryptAES256CFBDifferentFromInput(t *testing.T) {
-	for _, data := range AllData {
-		decrypted, err := decryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-
-		if len(data) != 0 {
-			assert.NotEqual(t, decrypted, data)
-		}
-	}
-}
-
-// The output of decryption should be the same as the original plaintext.
-func TestEncryptAES256CFBAndDecryptAES256CFB(t *testing.T) {
-	for _, data := range AllData {
-		encrypted, err := encryptAES256CFB(data, iv, key)
-		assert.NoError(t, err)
-
-		decrypted, err := decryptAES256CFB(encrypted, iv, key)
-		assert.NoError(t, err)
-
-		assert.Equal(t, data, decrypted)
-	}
-}
 
 // Make sure we get the original data back after we encrypt and decrypt it with
 // the top-level public functions.
 func TestEncryptAndDecrypt(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
-		encrypted, err := Encrypt(plaintext, password)
+		encrypted, err := Encrypt(password, plaintext)
 		assert.NoError(t, err)
 
-		decrypted, err := Decrypt(encrypted, password)
+		decrypted, err := Decrypt(password, encrypted)
 		assert.NoError(t, err)
 
 		assert.Equal(t, plaintext, decrypted)
@@ -365,13 +24,13 @@ func TestEncryptAndDecrypt(t *testing.T) {
 
 // Attempting to decrypt an empty blob should fail.
 func TestDecryptEmptyDataFails(t *testing.T) {
-	_, err := Decrypt(make([]byte, 0), "password")
+	_, err := Decrypt("password", make([]byte, 0))
 	assert.Error(t, err)
 }
 
 // Attempting to decrypt an empty blob with an empty password should fail.
 func TestDecryptEmptyDataEmptyPasswordFails(t *testing.T) {
-	_, err := Decrypt(make([]byte, 0), "")
+	_, err := Decrypt("", make([]byte, 0))
 	assert.Error(t, err)
 }
 
@@ -380,10 +39,10 @@ func TestDecryptEmptyDataEmptyPasswordFails(t *testing.T) {
 func TestDecryptEmptyPasswordFails(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
-		encrypted, err := Encrypt(plaintext, password)
+		encrypted, err := Encrypt(password, plaintext)
 		assert.NoError(t, err)
 
-		_, err = Decrypt(encrypted, "")
+		_, err = Decrypt("", encrypted)
 		assert.Error(t, err)
 	}
 }
@@ -392,26 +51,43 @@ func TestDecryptEmptyPasswordFails(t *testing.T) {
 func TestDecryptWrongPasswordFails(t *testing.T) {
 	password := "password"
 	for _, plaintext := range AllData {
-		encrypted, err := Encrypt(plaintext, password)
+		encrypted, err := Encrypt(password, plaintext)
 		assert.NoError(t, err)
 
-		_, err = Decrypt(encrypted, "incorrect")
+		_, err = Decrypt("incorrect", encrypted)
 		assert.Error(t, err)
 	}
 }
 
-// Attempting to decrypt a blob that has had bytes modified should fail.
+// Attempting to decrypt a blob that has had any one byte modified should fail.
 func TestDecryptModifiedBlobFails(t *testing.T) {
 	password := "password"
+
 	for _, plaintext := range AllData {
-		encrypted, err := Encrypt(plaintext, password)
+		encrypted, err := Encrypt(password, plaintext)
 		assert.NoError(t, err)
 
-		// Change a single byte to throw off the checksum.
-		encrypted[0]++
+		if (testing.Short()) {
+			// Change a single byte to save time and do a sanity check, otherwise this
+			// test can take many minutes.
+			encrypted[rand.Intn(len(encrypted))]++
 
-		_, err = Decrypt(encrypted, password)
-		assert.Error(t, err)
+			_, err = Decrypt(password, encrypted)
+			assert.Error(t, err)
+		} else {
+			// Change every single byte in turn and attempt to decrypt it. Any byte
+			// being changed should result in a failed decryption!
+			for i, originalByte := range encrypted {
+				encrypted[i]++
+
+				_, err = Decrypt(password, encrypted)
+				assert.Error(t, err)
+
+				// Restore the original byte value so we're only modifying one byte at a
+				// time from the original.
+				encrypted[i] = originalByte
+			}
+		}
 	}
 }
 
@@ -419,10 +95,10 @@ func TestDecryptModifiedBlobFails(t *testing.T) {
 func TestDecryptEmptyPassword(t *testing.T) {
 	password := ""
 	for _, plaintext := range AllData {
-		encrypted, err := Encrypt(plaintext, password)
+		encrypted, err := Encrypt(password, plaintext)
 		assert.NoError(t, err)
 
-		decrypted, err := Decrypt(encrypted, password)
+		decrypted, err := Decrypt(password, encrypted)
 		assert.NoError(t, err)
 		assert.Equal(t, plaintext, decrypted)
 	}

@@ -6,16 +6,16 @@ import (
 
 type cryptVersionNumber int32
 
-// A simple box to hold the number and functions associated with a particular
-// set of crypt functions.
+// A simple box to hold the version number and functions associated with a
+// particular version of our format.
 type cryptVersionRecord struct {
 	Version cryptVersionNumber
-	Encrypt func([]byte, string) ([]byte, error)
-	Decrypt func([]byte, string) ([]byte, error)
+	Encrypt func(string, []byte) ([]byte, error)
+	Decrypt func(string, []byte) ([]byte, error)
 }
 
-// A container that holds all the available version container in an immutable
-// manner, to prevent any modification of the canonical source list.
+// A container that holds all the available version container data in an
+// immutable manner, to prevent any modification of the canonical source list.
 type cryptVersions struct {
 	// An ordered list of crypt versions, from oldest to newest. The last item in
 	// the slice is guaranteed to be the latest version!
@@ -48,8 +48,7 @@ func newCryptVersions(records ...cryptVersionRecord) cryptVersions {
 	for i, v := range records {
 		// Ensure we never have duplicate version numbers.
 		if _, ok := versionsById[v.Version]; ok {
-			panic(
-				fmt.Sprintf("Can't duplicate version numbers (duplicated: %d", v.Version))
+			panic(fmt.Sprintf("Can't duplicate version numbers (duplicated: %d", v.Version))
 		}
 
 		versions[i] = v
